@@ -144,7 +144,7 @@ class HerdiAppDelegate: NSObject, NSApplicationDelegate {
             backing: .buffered, defer: false
         )
         window.title = "Add Remote"
-        window.contentView = NSHostingView(rootView: RemoteSettingsWindow(relay: relay) { rebuildMenu() })
+        window.contentView = NSHostingView(rootView: RemoteSettingsWindow(relay: relay) { self.rebuildMenu() })
         // Size the window to the SwiftUI content instead of the dummy contentRect.
         window.setContentSize(window.contentView?.fittingSize ?? NSMakeSize(420, 480))
         window.center()
