@@ -19,6 +19,7 @@ final class RelayConnection {
     private var task: URLSessionWebSocketTask?
     private let session = URLSession(configuration: .default)
     private var pollTimer: Timer?
+    private var lastRemotePoll: Date?
     private var reconnectAttempt = 0
     private var reconnecting = false
     private var herdrPath: String = ""
@@ -93,28 +94,43 @@ final class RelayConnection {
 
     private func pollHerdr() {
         DispatchQueue.global(qos: .utility).async { [self] in
-            // Check if herdr binary is found
-            if herdrPath.isEmpty {
-                DispatchQueue.main.async { [self] in
-                    isConnected = false
-                    herdrError = "herdr not found. Install herdr or set path in Settings."
-                    agents = []
-                }
-                return
+            // Remote cadence is decided first: a Mac without a local herdr still polls
+            // its remotes — the missing binary only zeroes the list when there is
+            // nothing else to ask. The early return this replaces was the "0 agents"
+            // dead end for anyone whose agents all live on the dev box.
+            let pollRemotes: Bool
+            if let last = lastRemotePoll, Date().timeIntervalSince(last) < 4.5 {
+                pollRemotes = false
+            } else {
+                lastRemotePoll = Date()
+                pollRemotes = true
             }
-            
-            // Local
-            var allAgents = parseAgents(from: runHerdr("pane", "list"), host: "local")
 
-            // Remotes via SSH
-            for remote in remotes {
-                let result = runSSH(remote, "herdr", "pane", "list")
-                allAgents += parseAgents(from: result, host: remote)
+            let hasLocal = !herdrPath.isEmpty
+            var allAgents = [ParsedAgent]()
+            if hasLocal {
+                allAgents = parseAgents(from: runHerdr("pane", "list"), host: "local")
+            }
+            if pollRemotes {
+                for remote in remotes {
+                    let result = runSSH(remote, remoteHerdrBin(remote), "pane", "list")
+                    allAgents += parseAgents(from: result, host: remote)
+                }
             }
 
             DispatchQueue.main.async { [self] in
-                isConnected = true
-                herdrError = nil  // Clear any previous error
+                if hasLocal {
+                    isConnected = true
+                    herdrError = nil  // Clear any previous error
+                } else if remotes.isEmpty {
+                    isConnected = false
+                    herdrError = "herdr not found. Install herdr or set path in Settings."
+                    agents = []
+                    return
+                } else {
+                    isConnected = true
+                    herdrError = nil  // Remote agents still flow; no local binary needed
+                }
                 var seen = Set<String>()
                 for a in allAgents {
                     seen.insert(a.id)
@@ -133,7 +149,12 @@ final class RelayConnection {
                         if a.status == .blocked { readPaneForBlocked(agent, remote: a.host == "local" ? nil : a.host) }
                     }
                 }
-                agents.removeAll { !seen.contains($0.id) }
+                // A tick that skipped the remotes has no say over them: the sweep would
+                // delete every remote agent on the ticks between remote polls.
+                agents.removeAll { a in
+                    if a.host != "local" && !pollRemotes { return false }
+                    return !seen.contains(a.id)
+                }
             }
         }
     }
@@ -176,13 +197,26 @@ final class RelayConnection {
         let process = Process()
         let password = KeychainHelper.getPassword(for: remote)
 
+        // ClearAllForwardings: a one-shot command needs none of the user's
+        // DynamicForward/RemoteForward config, and rebuilding those every poll would
+        // race the user's own sessions holding them. ControlMaster=auto with a short
+        // persist reuses the connection across polls — on proxied links (ProxyCommand)
+        // that turns a multi-second handshake into milliseconds. `auto` also means an
+        // existing master from the user's own terminal is reused, never contested.
+        let connectionOptions = [
+            "-o", "ConnectTimeout=5",
+            "-o", "ClearAllForwardings=yes",
+            "-o", "ControlMaster=auto",
+            "-o", "ControlPersist=10s"
+        ]
+
         if let password, FileManager.default.fileExists(atPath: "/opt/homebrew/bin/sshpass") {
             // Use sshpass for password auth
             process.executableURL = URL(fileURLWithPath: "/opt/homebrew/bin/sshpass")
-            process.arguments = ["-p", password, "ssh", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=no", remote] + args
+            process.arguments = ["-p", password, "ssh", "-o", "StrictHostKeyChecking=no"] + connectionOptions + [remote] + args
         } else {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-            process.arguments = ["-o", "ConnectTimeout=5", "-o", "BatchMode=yes", remote] + args
+            process.arguments = ["-o", "BatchMode=yes"] + connectionOptions + [remote] + args
         }
 
         let pipe = Pipe()
@@ -196,19 +230,123 @@ final class RelayConnection {
         } catch { return "" }
     }
 
-    func addRemote(_ remote: String, password: String? = nil) {
+    func addRemote(_ remote: String, password: String? = nil, label: String? = nil, herdrPath: String? = nil) {
         guard !remote.isEmpty, !remotes.contains(remote) else { return }
         remotes.append(remote)
         UserDefaults.standard.set(remotes, forKey: "herdi_remotes")
         if let password, !password.isEmpty {
             KeychainHelper.setPassword(password, for: remote)
         }
+        saveRemoteSettings(remote, label: label, herdrPath: herdrPath)
     }
 
     func removeRemote(_ remote: String) {
         remotes.removeAll { $0 == remote }
         UserDefaults.standard.set(remotes, forKey: "herdi_remotes")
         KeychainHelper.deletePassword(for: remote)
+        var settings = Self.loadRemoteSettings()
+        settings.removeValue(forKey: remote)
+        Self.storeRemoteSettings(settings)
+    }
+
+    // MARK: - Remote settings
+
+    struct RemoteSettings: Codable {
+        var label: String?
+        var herdrPath: String?
+    }
+
+    /// Per-remote extras keyed by the SSH target string. `herdi_remotes` stays a plain
+    /// array so hand-written `defaults write` configs keep working; everything new
+    /// hangs off a separate dictionary.
+    private static func loadRemoteSettings() -> [String: RemoteSettings] {
+        guard let data = UserDefaults.standard.data(forKey: "herdi_remote_settings"),
+              let decoded = try? JSONDecoder().decode([String: RemoteSettings].self, from: data) else { return [:] }
+        return decoded
+    }
+
+    private static func storeRemoteSettings(_ settings: [String: RemoteSettings]) {
+        if let data = try? JSONEncoder().encode(settings) {
+            UserDefaults.standard.set(data, forKey: "herdi_remote_settings")
+        }
+    }
+
+    private func saveRemoteSettings(_ remote: String, label: String?, herdrPath: String?) {
+        var settings = Self.loadRemoteSettings()
+        let existing = settings[remote] ?? RemoteSettings(label: nil, herdrPath: nil)
+        let trimmed = (label ?? "").trimmingCharacters(in: .whitespaces)
+        let bin = (herdrPath ?? "").trimmingCharacters(in: .whitespaces)
+        settings[remote] = RemoteSettings(
+            label: trimmed.isEmpty ? nil : trimmed,
+            herdrPath: bin.isEmpty ? nil : bin
+        )
+        Self.storeRemoteSettings(settings)
+    }
+
+    func displayName(for remote: String) -> String {
+        let s = Self.loadRemoteSettings()[remote]?.label
+        return (s?.isEmpty == false) ? s! : remote
+    }
+
+    /// The binary name sent over SSH. Users whose herdr is not on the non-interactive
+    /// shell's PATH (e.g. ~/.local/bin) set a full path per remote in the form.
+    func remoteHerdrBin(_ remote: String) -> String {
+        if let p = Self.loadRemoteSettings()[remote]?.herdrPath, !p.isEmpty { return p }
+        return "herdr"
+    }
+
+    // MARK: - Test connection
+
+    enum TestResult {
+        case ok(agentCount: Int)
+        case authFailed
+        case timeout
+        case binaryNotFound(bin: String)
+        case sshpassMissing
+        case failed(String)
+    }
+
+    /// One probe before saving. Failures are classified, never silent — the poll path
+    /// returns "" for everything, which is exactly why "0 agents" used to be a dead end.
+    func testConnection(_ remote: String, herdrPath: String?) -> TestResult {
+        let bin = (herdrPath?.trimmingCharacters(in: .whitespaces).isEmpty == false)
+            ? herdrPath!.trimmingCharacters(in: .whitespaces)
+            : "herdr"
+        let password = KeychainHelper.getPassword(for: remote)
+        if password != nil && !FileManager.default.fileExists(atPath: "/opt/homebrew/bin/sshpass") {
+            return .sshpassMissing
+        }
+        let started = Date()
+        let output = runSSH(remote, bin, "pane", "list")
+        let elapsed = Date().timeIntervalSince(started)
+
+        if !output.isEmpty {
+            let count = parseAgents(from: output, host: remote).count
+            return .ok(agentCount: count)
+        }
+        if elapsed >= 4.5 {
+            return .timeout
+        }
+        // Distinguish auth from a missing binary: BatchMode ssh exits 255 on auth
+        // failure, while a successful connection running an unknown command does not.
+        if sshExitStatus(remote, bin, ["--help"]) == 255 {
+            return .authFailed
+        }
+        return .binaryNotFound(bin: bin)
+    }
+
+    private func sshExitStatus(_ remote: String, _ bin: String, _ args: [String]) -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        process.arguments = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+                             "-o", "ClearAllForwardings=yes", remote, bin] + args
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus
+        } catch { return -1 }
     }
 
     private func readPaneForBlocked(_ agent: Agent, remote: String? = nil) {
@@ -226,7 +364,7 @@ final class RelayConnection {
             // screen by definition, so nothing is given up either way.
             let raw: String
             if let remote {
-                raw = runSSH(remote, "herdr", "pane", "read", paneId, "--lines", "20", "--source", "visible")
+                raw = runSSH(remote, remoteHerdrBin(remote), "pane", "read", paneId, "--lines", "20", "--source", "visible")
             } else {
                 raw = runHerdr("pane", "read", paneId, "--lines", "20", "--source", "visible")
             }
@@ -300,7 +438,7 @@ final class RelayConnection {
                 // Check if this is a remote agent (id starts with "host:")
                 if let agent = agents.first(where: { $0.id == paneId }), agent.host != "local" {
                     let realId = String(paneId.drop(while: { $0 != ":" }).dropFirst())
-                    _ = runSSH(agent.host, "herdr", "pane", "send-text", realId, response.text + "\n")
+                    _ = runSSH(agent.host, remoteHerdrBin(agent.host), "pane", "send-text", realId, response.text + "\n")
                 } else {
                     _ = runHerdr("pane", "send-text", paneId, response.text + "\n")
                 }
@@ -333,10 +471,11 @@ final class RelayConnection {
             if let agent = agents.first(where: { $0.id == paneId }), agent.host != "local" {
                 let prefix = agent.host + ":"
                 let remotePaneId = paneId.hasPrefix(prefix) ? String(paneId.dropFirst(prefix.count)) : paneId
-                let output = runSSH(agent.host, "herdr", "pane", "get", remotePaneId)
+                let bin = remoteHerdrBin(agent.host)
+                let output = runSSH(agent.host, bin, "pane", "get", remotePaneId)
                 guard let location = parsePaneLocation(from: output) else { return }
-                _ = runSSH(agent.host, "herdr", "workspace", "focus", location.workspaceId)
-                _ = runSSH(agent.host, "herdr", "tab", "focus", location.tabId)
+                _ = runSSH(agent.host, bin, "workspace", "focus", location.workspaceId)
+                _ = runSSH(agent.host, bin, "tab", "focus", location.tabId)
                 return
             }
 

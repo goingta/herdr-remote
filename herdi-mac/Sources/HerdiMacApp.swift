@@ -7,7 +7,7 @@ struct HerdiApp: App {
     @NSApplicationDelegateAdaptor(HerdiAppDelegate.self) var appDelegate
 
     var body: some Scene {
-        // No visible window — the panel IS the UI
+        // No visible window — the panel IS the UI; Add Remote uses its own NSWindow
         Settings { EmptyView() }
     }
 }
@@ -17,6 +17,7 @@ class HerdiAppDelegate: NSObject, NSApplicationDelegate {
     var panelController: PanelWindowController?
     let relay = RelayConnection()
     private var statusItem: NSStatusItem?
+    private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Request notification permissions
@@ -85,10 +86,21 @@ class HerdiAppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(noRemotes)
         } else {
             for remote in relay.remotes {
-                let item = NSMenuItem(title: "  \(remote)", action: nil, keyEquivalent: "")
+                let item = NSMenuItem(title: "  \(relay.displayName(for: remote))", action: nil, keyEquivalent: "")
                 item.isEnabled = false
                 menu.addItem(item)
             }
+        }
+
+        let addRemoteItem = NSMenuItem(title: "  Add Remote…", action: #selector(addRemote), keyEquivalent: "")
+        addRemoteItem.target = self
+        menu.addItem(addRemoteItem)
+
+        for remote in relay.remotes {
+            let removeItem = NSMenuItem(title: "  Remove \(relay.displayName(for: remote))", action: #selector(removeRemote(_:)), keyEquivalent: "")
+            removeItem.target = self
+            removeItem.representedObject = remote
+            menu.addItem(removeItem)
         }
 
         menu.addItem(.separator())
@@ -122,6 +134,28 @@ class HerdiAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func switchToDirect() {
         relay.startDirect()
+        rebuildMenu()
+    }
+
+    @objc private func addRemote() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 0),
+            styleMask: [.titled, .closable],
+            backing: .buffered, defer: false
+        )
+        window.title = "Add Remote"
+        window.contentView = NSHostingView(rootView: RemoteSettingsWindow(relay: relay) { rebuildMenu() })
+        // Size the window to the SwiftUI content instead of the dummy contentRect.
+        window.setContentSize(window.contentView?.fittingSize ?? NSMakeSize(420, 480))
+        window.center()
+        settingsWindow = window
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func removeRemote(_ sender: NSMenuItem) {
+        guard let remote = sender.representedObject as? String else { return }
+        relay.removeRemote(remote)
         rebuildMenu()
     }
 
