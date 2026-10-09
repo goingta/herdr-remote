@@ -48,8 +48,12 @@ targets:
         CODE_SIGN_IDENTITY: "-"
         ENABLE_HARDENED_RUNTIME: false
         GENERATE_INFOPLIST_FILE: true
-        INFOPLIST_KEY_NSExtension_NSExtensionPointIdentifier: com.apple.widgetkit-extension
     entitlements:
       path: HerdiWidget.entitlements
       properties:
         com.apple.security.app-sandbox: true
+    info:
+      path: Widget/Info.plist
+      properties:
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
