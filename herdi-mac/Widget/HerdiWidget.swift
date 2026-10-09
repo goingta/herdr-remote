@@ -122,3 +122,14 @@ struct HerdiWidget: Widget {
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
+
+// The extension process's entry point. WidgetKit launches the .appex, walks the
+// bundle for this @main, and drives every widget it lists from it. Leaving it out
+// compiles clean and crashes instantly at willFinishLaunching (EXC_BREAKPOINT) —
+// which the gallery reads as "not a widget" and hides it.
+@main
+struct HerdiWidgetBundle: WidgetBundle {
+    var body: some Widget {
+        HerdiWidget()
+    }
+}
