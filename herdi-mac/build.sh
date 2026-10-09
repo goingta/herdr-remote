@@ -3,81 +3,48 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="Herdi"
-BUNDLE_ID="com.dcolinmorgan.herdi"
-VERSION="0.8.0"
-BUILD_DIR="$SCRIPT_DIR/.build/release"
 APP_DIR="$SCRIPT_DIR/dist/$APP_NAME.app"
 
-echo "▸ Building release..."
+# The widget is an .appex app extension: swift build cannot produce or embed one,
+# so the whole build goes through XcodeGen + xcodebuild. Nested signing is xcodebuild's
+# job — the widget must be signed before the app that embeds it, and hand-rolled
+# codesign after the fact would break that order.
 cd "$SCRIPT_DIR"
-swift build -c release
 
-echo "▸ Creating .app bundle..."
+if ! command -v xcodegen >/dev/null 2>&1; then
+    echo "xcodegen missing: brew install xcodegen" >&2
+    exit 1
+fi
+
+echo "▸ Generating Xcode project..."
+xcodegen generate
+
+echo "▸ Building (Release)..."
+xcodebuild \
+    -project Herdi.xcodeproj \
+    -scheme Herdi \
+    -configuration Release \
+    -derivedDataPath .build/xcode \
+    build \
+    CODE_SIGN_IDENTITY="-" \
+    CODE_SIGNING_REQUIRED=YES \
+    | tail -20
+
+BUILT_APP=".build/xcode/Build/Products/Release/$APP_NAME.app"
+if [ ! -d "$BUILT_APP" ]; then
+    echo "Build product missing: $BUILT_APP" >&2
+    exit 1
+fi
+
+echo "▸ Staging .app bundle..."
 rm -rf "$APP_DIR"
-mkdir -p "$APP_DIR/Contents/MacOS"
-mkdir -p "$APP_DIR/Contents/Resources"
+mkdir -p dist
+cp -R "$BUILT_APP" "$APP_DIR"
 
-cp "$BUILD_DIR/$APP_NAME" "$APP_DIR/Contents/MacOS/$APP_NAME"
-
-# Copy icon if present
-if [ -f "$SCRIPT_DIR/Sources/Assets/AppIcon.icns" ]; then
+# Icon, if present (XcodeGen picks up Assets.xcassets; this covers the bare .icns)
+if [ -f "$SCRIPT_DIR/Sources/Assets/AppIcon.icns" ] && [ ! -d "$SCRIPT_DIR/Sources/Assets.xcassets" ]; then
     cp "$SCRIPT_DIR/Sources/Assets/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
 fi
 
-cat > "$APP_DIR/Contents/Info.plist" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>$APP_NAME</string>
-    <key>CFBundleIdentifier</key>
-    <string>$BUNDLE_ID</string>
-    <key>CFBundleName</key>
-    <string>Herdi</string>
-    <key>CFBundleDisplayName</key>
-    <string>Herdi</string>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
-    <key>CFBundleVersion</key>
-    <string>1</string>
-    <key>CFBundleShortVersionString</key>
-    <string>$VERSION</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
-    <key>LSUIElement</key>
-    <true/>
-    <key>NSLocalNetworkUsageDescription</key>
-    <string>Herdi discovers the relay daemon on your local network.</string>
-    <key>NSBonjourServices</key>
-    <array>
-        <string>_herdi._tcp</string>
-    </array>
-    <key>NSAppTransportSecurity</key>
-    <dict>
-        <key>NSAllowsArbitraryLoads</key>
-        <true/>
-    </dict>
-</dict>
-</plist>
-EOF
-
-# Ad-hoc sign
-echo "▸ Signing..."
-codesign --force --sign - --entitlements /dev/stdin "$APP_DIR" << 'ENTITLEMENTS'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>com.apple.security.app-sandbox</key>
-    <false/>
-    <key>com.apple.security.network.client</key>
-    <true/>
-</dict>
-</plist>
-ENTITLEMENTS
-
 echo "✓ Built: $APP_DIR"
-echo "  To install: cp -r $APP_DIR /Applications/"
+echo "  To install: cp -R $APP_DIR /Applications/"

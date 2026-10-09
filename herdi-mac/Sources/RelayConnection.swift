@@ -2,6 +2,7 @@ import Foundation
 import Network
 import Observation
 import UserNotifications
+import WidgetKit
 
 @Observable
 final class RelayConnection {
@@ -155,8 +156,35 @@ final class RelayConnection {
                     if a.host != "local" && !pollRemotes { return false }
                     return !seen.contains(a.id)
                 }
+                publishWidgetSnapshot()
             }
         }
+    }
+
+    /// The desktop widget cannot reach herdr itself — no SSH, no socket — so the
+    /// app publishes a snapshot into the shared container after every poll that
+    /// changed something, and asks WidgetKit to re-read it. Reloads are budgeted
+    /// by the system, so identical states are skipped: most ticks are idle panes
+    /// repeating themselves, and spending the budget on those starves real changes.
+    private func publishWidgetSnapshot() {
+        let rows = agents.map {
+            WidgetAgent(agent: $0.name, project: $0.project, status: $0.status.rawValue)
+        }
+        let snapshot = HerdiSnapshot(
+            updatedAt: Date(),
+            blocked: rows.filter { $0.status == "blocked" }.count,
+            working: rows.filter { $0.status == "working" }.count,
+            done: rows.filter { $0.status == "done" }.count,
+            idle: rows.filter { $0.status == "idle" || $0.status == "unknown" }.count,
+            agents: rows.sorted { ($0.rank, $0.project) < ($1.rank, $1.project) }
+        )
+        if let current = HerdiSnapshot.load(), current.blocked == snapshot.blocked,
+           current.working == snapshot.working, current.done == snapshot.done,
+           current.idle == snapshot.idle, current.agents == snapshot.agents {
+            return
+        }
+        HerdiSnapshot.save(snapshot)
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     private struct ParsedAgent {
