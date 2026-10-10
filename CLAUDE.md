@@ -56,6 +56,32 @@ newline is the Enter that submits it).
 - **The harvest caches.** Cold it is seconds; re-reading the same rows is instant. Timing a
   second read tells you nothing about what the first one cost.
 
+**This dev box also runs a seventh client this repo does not own: herdr-web-ui**
+(upstream `devswha/herdr-web-ui`, installed as a herdr plugin). It listens on
+`0.0.0.0:7861` (`bun`, supervised by the herdr plugin system) and is the actual
+entry point from the phone — "手机端 Tab 里的 claude" means this server's PWA, which
+follows herdr's own tab structure the way the repo's `web/` app follows spaces.
+Its prompt parser and answer path (`server/prompt.ts` in
+`~/.config/herdr-web-ui/updates/<rev>/release-*/`) are a third independent
+implementation of the same reply semantics the relay and the mac app each carry;
+none of this repo's tests or `verify-*.sh` scripts reach it. Its log
+(`~/.local/state/herdr/plugins/devswha.herdr-web-ui/server.log`) records updates
+only — **no request-level lines**, so a "tapped Allow, nothing happened" report from
+the phone is not answerable from that log. To see what the phone's card would act
+on, replay the read side yourself: `curl http://127.0.0.1:7861/api/pane/prompt?pane_id=<id>`
+(auth required) returns the parsed prompt, or read the pane directly with
+`herdr pane read <id> --source visible` and answer it there to unblock the agent
+while diagnosing.
+
+**Symptom before root cause: a "clicked X, nothing happened" report is about a
+client before it is about a bug.** This project has four reply paths with four
+independent implementations — repo relay, mac direct mode, this repo's `web/`
+app, and the third-party herdr-web-ui above (plus TUI/Telegram, which ride the
+relay). Confirm which client and which path produced the report before opening
+any of them; two consecutive "Allow 失效" rounds here had disjoint causes
+(mac SSH quoting vs. the phone's unlogged web-ui path) and the first round's
+diagnosis applied to neither line of the second.
+
 ## Components
 
 | Path | What | Language |
