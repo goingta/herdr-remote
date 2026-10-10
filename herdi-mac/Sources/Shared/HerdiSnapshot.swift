@@ -10,6 +10,9 @@ struct WidgetAgent: Codable, Hashable {
     var agent: String
     var project: String
     var status: String
+    // herdr's stripped terminal title — the live task name. Old cached snapshots
+    // decode fine without it (nil).
+    var session: String?
 
     /// Sort rank: the neediest first, matching the herd list's ordering idea.
     var rank: Int {

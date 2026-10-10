@@ -12,6 +12,9 @@ final class Agent: Identifiable {
     var project: String
     var cwd: String
     var host: String
+    // herdr's stripped terminal title — the live task name ("pnpm 项目启动"); nil for
+    // panes whose title is just the harness banner.
+    var session: String?
     var prompt: String?
     var options: [String]?
     var promptId: String?

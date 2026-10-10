@@ -174,8 +174,10 @@ final class RelayConnection {
                         }
                         if existing.project != a.project { existing.project = a.project }
                         if existing.host != a.host { existing.host = a.host }
+                        if existing.session != a.session { existing.session = a.session }
                     } else {
                         let agent = Agent(id: a.id, name: a.name, status: a.status, project: a.project, cwd: a.cwd, host: a.host)
+                        agent.session = a.session
                         agents.append(agent)
                         if a.status == .blocked { readPaneForBlocked(agent, remote: a.host == "local" ? nil : a.host) }
                     }
@@ -198,7 +200,7 @@ final class RelayConnection {
     /// repeating themselves, and spending the budget on those starves real changes.
     private func publishWidgetSnapshot() {
         let rows = agents.map {
-            WidgetAgent(agent: $0.name, project: $0.project, status: $0.status.rawValue)
+            WidgetAgent(agent: $0.name, project: $0.project, status: $0.status.rawValue, session: $0.session)
         }
         let snapshot = HerdiSnapshot(
             updatedAt: Date(),
@@ -224,6 +226,7 @@ final class RelayConnection {
 
     private struct ParsedAgent {
         let id: String, name: String, status: AgentStatus, project: String, cwd: String, host: String
+        var session: String?
     }
 
     private struct PaneLocation {
@@ -242,7 +245,11 @@ final class RelayConnection {
             let paneId = (host == "local" ? "" : "\(host):") + (p["pane_id"] as? String ?? "")
             let status = AgentStatus(rawValue: p["agent_status"] as? String ?? "unknown") ?? .unknown
             let cwd = p["cwd"] as? String ?? ""
-            return ParsedAgent(id: paneId, name: agent, status: status, project: (cwd as NSString).lastPathComponent, cwd: cwd, host: host)
+            // herdr's terminal title carries the live task name ("接入 deepseek-harness 到多
+            // Agent 方案"); the stripped variant drops the harness spinner prefix. Idle
+            // panes leave the harness banner here ("Claude Code") — the widget de-dupes.
+            let session = (p["terminal_title_stripped"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+            return ParsedAgent(id: paneId, name: agent, status: status, project: (cwd as NSString).lastPathComponent, cwd: cwd, host: host, session: session.isEmpty ? nil : session)
         }
     }
 

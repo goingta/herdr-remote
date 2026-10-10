@@ -37,6 +37,7 @@ struct HerdiProvider: TimelineProvider {
 }
 
 struct HerdiWidgetView: View {
+    @Environment(\.widgetFamily) private var family
     let entry: HerdiEntry
 
     var body: some View {
@@ -52,15 +53,23 @@ struct HerdiWidgetView: View {
         .containerBackground(.fill.tertiary, for: .widget)
     }
 
+    private var maxRows: Int {
+        switch family {
+        case .systemSmall: return 3
+        case .systemLarge: return 12
+        default: return 5
+        }
+    }
+
     private func content(_ s: HerdiSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             countsRow(s)
             if !s.agents.isEmpty {
-                ForEach(s.agents.prefix(4), id: \.self) { a in
+                ForEach(s.agents.prefix(maxRows), id: \.self) { a in
                     agentRow(a)
                 }
-                if s.agents.count > 4 {
-                    Text("+\(s.agents.count - 4) more")
+                if s.agents.count > maxRows {
+                    Text("+\(s.agents.count - maxRows) more")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -83,14 +92,35 @@ struct HerdiWidgetView: View {
             Circle()
                 .fill(color(for: a.status))
                 .frame(width: 7, height: 7)
-            Text(a.project)
+            Text(displayTitle(a))
                 .font(.caption)
                 .lineLimit(1)
+                .truncationMode(.tail)
             Spacer(minLength: 0)
             Text(a.agent)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    /// 【项目 · 会话名】when herdr's title says something real; bare project when the
+    /// title is just the harness banner ("Claude Code") or empty — repeating the
+    /// agent column as a title wastes the row.
+    private func displayTitle(_ a: WidgetAgent) -> String {
+        var session = (a.session ?? "").trimmingCharacters(in: .whitespaces)
+        let project = a.project
+        // codex titles end in " | project" — herdr appends it, and we already show
+        // the project, so drop the tail before composing.
+        if session.hasSuffix("| " + project) {
+            session = String(session.dropLast(project.count + 2)).trimmingCharacters(in: .whitespaces)
+        } else if session.hasSuffix("|" + project) {
+            session = String(session.dropLast(project.count + 1)).trimmingCharacters(in: .whitespaces)
+        }
+        let isBanner = session.isEmpty
+            || session.lowercased() == a.agent.lowercased()
+            || session.lowercased() == "claude code"
+            || session.lowercased() == "codex"
+        return isBanner ? project : "【\(project) · \(session)】"
     }
 
     private func badge(_ n: Int, color: Color, icon: String) -> some View {
@@ -119,7 +149,7 @@ struct HerdiWidget: Widget {
         }
         .configurationDisplayName("herdi agents")
         .description("Agent status from your herdr fleet, updated by the menu-bar app.")
-        .supportedFamilies([.systemSmall, .systemMedium])
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }
 
