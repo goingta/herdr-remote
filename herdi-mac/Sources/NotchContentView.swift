@@ -717,6 +717,15 @@ private struct ResponseButtonGrid: View {
     private func mapOption(_ option: String) -> ResponseAction {
         let lower = option.lowercased()
 
+        // Codex approval-menu shortcuts (rawValue is the byte send-text sends):
+        // "y" confirms, "p" is "yes, and don't ask again", ESC cancels.
+        if option == "\u{1B}" {
+            return ResponseAction(label: "Deny", icon: "xmark", tint: .red, shortcut: "⌘N", rawValue: option)
+        }
+        if lower == "p" {
+            return ResponseAction(label: "Trust", icon: "shield.checkered", tint: .blue, shortcut: "⌘T", rawValue: option)
+        }
+
         // Permission responses
         if lower.contains("single permission") || lower == "y" || lower == "yes" {
             return ResponseAction(label: "Allow", icon: "checkmark", tint: .green, shortcut: "⌘Y", rawValue: option)

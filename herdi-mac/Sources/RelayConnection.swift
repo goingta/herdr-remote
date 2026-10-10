@@ -478,6 +478,14 @@ final class RelayConnection {
 
     private func detectOptions(_ text: String) -> [String] {
         let lower = text.lowercased()
+        // Codex's approval menu is a key-select list ("1. Yes, proceed (y)"),
+        // not a text prompt: the reply that works is the option's own shortcut
+        // key, and the rawValue doubles as the bytes send-text puts on the wire.
+        // Option words typed in full would confirm on the leading "y" and spill
+        // "es, single permission" into the composer.
+        if lower.contains("press enter to confirm") || lower.contains("yes, proceed") {
+            return ["y", "p", "\u{1B}"]
+        }
         if lower.contains("yes, single permission") {
             return ["yes, single permission", "trust, always allow", "no (tab to edit)"]
         }
