@@ -3,8 +3,8 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(RelayConnection.self) private var relay
     @Environment(\.dismiss) private var dismiss
-    @State private var manualHost = relay.hostAddress
-    @State private var manualToken = relay.token
+    @State private var manualHost = ""
+    @State private var manualToken = ""
 
     var body: some View {
         NavigationStack {
@@ -48,6 +48,10 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .onAppear {
+                manualHost = relay.hostAddress
+                manualToken = relay.token
+            }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
