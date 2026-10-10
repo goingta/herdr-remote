@@ -32,6 +32,22 @@ automatic read must pass `--source visible`.** `recent` past the viewport is a
 moving the operator's terminal to do it, and it only works while the agent is idle.
 The relay reads `visible` for exactly this reason (`PROMPT_READ_SOURCE`).
 
+**The mac app's direct mode re-implements the relay's remote-CLI semantics, and the
+two must move together.** `runSSH` hands its argv to the remote login shell, so every
+argument carrying client text is shlex-quoted exactly like the relay's
+`_invoke_herdr` (PR #77 fixed the relay; the mac twin survived five days and bit as
+`05f61f6`). The reply-composition rules live in `replyPayload` (single-character
+shortcut replies go bare; word replies carry the `\n` that submits them) and
+`detectOptions` maps each harness's dialog shape — codex approval menus are
+key-select (`y`/`p`/ESC), so their rawValues *are* the bytes sent. When you change
+what the relay sends, grep `herdi-mac/Sources/RelayConnection.swift` for the same
+path. HerdiTests pins all three.
+
+**herdr version baseline (2026-10-11): mac 0.9.3, Linux (dev box) 0.9.1.** Every
+remote command from the mac crosses this gap; upgrade both sides together, and note
+`pane send-text` byte semantics are the load-bearing part (a reply's trailing
+newline is the Enter that submits it).
+
 - **Omitting `--format` gets you the harvesting one.** Verified on a 48-row idle claude
   pane: `--lines 200 --source recent` with no `--format`, and with `--format text`, both
   return 137 rows of real older output; `--format ansi` returns the 37 on screen, same as

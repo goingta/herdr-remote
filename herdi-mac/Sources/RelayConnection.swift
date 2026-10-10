@@ -1,11 +1,13 @@
 import Foundation
 import Network
 import Observation
+import os
 import UserNotifications
 import WidgetKit
 
 @Observable
 final class RelayConnection {
+    private let sendLog = Logger(subsystem: "com.herdr.herdi", category: "Send")
     var agents: [Agent] = []
     var isConnected = false
     var hostAddress = "ws://127.0.0.1:8375"
@@ -550,6 +552,9 @@ final class RelayConnection {
                 // newline: for a text-answer prompt it is the Enter that submits.
                 let bare = response.text.count <= 1
                 let payload = bare ? response.text : response.text + "\n"
+                // The one trace of an outgoing reply: without it, a "clicked
+                // Allow, nothing happened" report has nothing to inspect.
+                sendLog.notice("reply pane=\(paneId, privacy: .public) bytes=\(payload.utf8.count, privacy: .public) bare=\(bare, privacy: .public) head=\(String(payload.prefix(12)).debugDescription, privacy: .public)")
                 // Check if this is a remote agent (id starts with "host:")
                 if let agent = agents.first(where: { $0.id == paneId }), agent.host != "local" {
                     let realId = String(paneId.drop(while: { $0 != ":" }).dropFirst())
