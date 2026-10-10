@@ -41,12 +41,29 @@ enum StatusBarIcon {
     }
 }
 
+/// Where a status-item click routes. Left click opens the agent panel (the
+/// surface the README's screenshot shows); right click opens the settings
+/// menu. Kept a pure mapping so the routing is testable — the shape this
+/// replaced, assigning `statusItem?.menu`, hands every click to the menu and
+/// leaves the panel with no manual way back.
+enum StatusItemClick {
+    enum Route: Equatable { case togglePanel, settingsMenu }
+
+    static func route(for type: NSEvent.EventType) -> Route {
+        switch type {
+        case .rightMouseUp, .otherMouseUp: return .settingsMenu
+        default: return .togglePanel
+        }
+    }
+}
+
 @MainActor
 class HerdiAppDelegate: NSObject, NSApplicationDelegate {
     var panelController: PanelWindowController?
     let relay = RelayConnection()
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
+    private var rightClickMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Request notification permissions
@@ -110,11 +127,48 @@ class HerdiAppDelegate: NSObject, NSApplicationDelegate {
             button.image = StatusBarIcon.idle
             button.image?.size = NSSize(width: 14, height: 14)
             button.setAccessibilityLabel("Herdi")
+            // Left click opens the agent panel (see StatusItemClick). The
+            // action mask carries leftMouseUp only: NSControl starts its
+            // tracking on leftMouseDown, so a rightMouseUp in the mask never
+            // reaches the action — right clicks come through the local
+            // monitor below instead.
+            button.action = #selector(statusItemClicked)
+            button.target = self
+            button.sendAction(on: [.leftMouseUp])
         }
-        rebuildMenu()
+        rightClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseUp, .otherMouseUp]) { [weak self] event in
+            guard let self,
+                  let button = self.statusItem?.button,
+                  event.window === button.window,
+                  StatusItemClick.route(for: event.type) == .settingsMenu else { return event }
+            self.showSettingsMenu()
+            return nil
+        }
     }
 
-    private func rebuildMenu() {
+    @objc private func statusItemClicked() {
+        togglePanel()
+    }
+
+    private func showSettingsMenu() {
+        // Menu pop-up positions itself under the icon only while
+        // statusItem.menu is set: hang it, performClick runs the menu
+        // tracking synchronously, then take it straight back off — leaving
+        // it set would route the next LEFT click into the menu too.
+        statusItem?.menu = buildMenu()
+        statusItem?.button?.performClick(nil)
+        statusItem?.menu = nil
+    }
+
+    private func togglePanel() {
+        guard let panelController else { return }
+        let expanding = !panelController.surface.isExpanded
+        withAnimation(expanding ? NotchAnimation.open : NotchAnimation.close) {
+            panelController.surface = expanding ? .sessionList : .collapsed
+        }
+    }
+
+    private func buildMenu() -> NSMenu {
         let menu = NSMenu()
         let updater = Updater.shared
 
@@ -215,12 +269,11 @@ class HerdiAppDelegate: NSObject, NSApplicationDelegate {
         // Quit
         menu.addItem(NSMenuItem(title: "Quit Herdi", action: #selector(quitApp), keyEquivalent: "q"))
 
-        self.statusItem?.menu = menu
+        return menu
     }
 
     @objc private func switchToDirect() {
         relay.startDirect()
-        rebuildMenu()
     }
 
     @objc private func addRemote() {
@@ -230,7 +283,7 @@ class HerdiAppDelegate: NSObject, NSApplicationDelegate {
             backing: .buffered, defer: false
         )
         window.title = "Add Remote"
-        window.contentView = NSHostingView(rootView: RemoteSettingsWindow(relay: relay) { self.rebuildMenu() })
+        window.contentView = NSHostingView(rootView: RemoteSettingsWindow(relay: relay) {})
         // Size the window to the SwiftUI content instead of the dummy contentRect.
         window.setContentSize(window.contentView?.fittingSize ?? NSMakeSize(420, 480))
         window.center()
@@ -242,18 +295,15 @@ class HerdiAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func removeRemote(_ sender: NSMenuItem) {
         guard let remote = sender.representedObject as? String else { return }
         relay.removeRemote(remote)
-        rebuildMenu()
     }
 
     @objc private func selectTerminalHost(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let host = TerminalHost(rawValue: raw) else { return }
         TerminalHost.select(host)
-        rebuildMenu()
     }
 
     @objc private func switchToRelay() {
         relay.connectRelay(to: relay.hostAddress)
-        rebuildMenu()
     }
 
     @objc private func toggleLaunchAtLogin() {
@@ -267,7 +317,6 @@ class HerdiAppDelegate: NSObject, NSApplicationDelegate {
             }
             UserDefaults.standard.set(newValue, forKey: "launchAtLogin")
         } catch {}
-        rebuildMenu()
     }
 
     @objc private func checkForUpdates() {
@@ -310,9 +359,6 @@ class HerdiAppDelegate: NSObject, NSApplicationDelegate {
                         self.panelController?.surface = .approval(agentId: agent.id)
                     }
                 }
-
-                // Rebuild menu every 5s for fresh status
-                self.rebuildMenu()
             }
         }
     }
