@@ -21,6 +21,7 @@ final class RelayConnection {
     private let session = URLSession(configuration: .default)
     private var pollTimer: Timer?
     private var lastRemotePoll: Date?
+    private var isPolling = false
     private var reconnectAttempt = 0
     private var reconnecting = false
     private var herdrPath: String = ""
@@ -94,7 +95,14 @@ final class RelayConnection {
     }
 
     private func pollHerdr() {
+        // One poll in flight at any time. A tick that fires while the previous one
+        // still runs (slow SSH link, hung subprocess) is skipped outright — enqueueing
+        // it would pile a new utility thread onto the same blockage every 2s, which
+        // is exactly how the process once accumulated 500+ stuck poll threads.
+        guard !isPolling else { return }
+        isPolling = true
         DispatchQueue.global(qos: .utility).async { [self] in
+            defer { isPolling = false }
             // Remote cadence is decided first: a Mac without a local herdr still polls
             // its remotes — the missing binary only zeroes the list when there is
             // nothing else to ask. The early return this replaces was the "0 agents"
@@ -223,19 +231,26 @@ final class RelayConnection {
 
     private func runSSH(_ remote: String, _ args: String...) -> String {
         let process = Process()
-        let password = KeychainHelper.getPassword(for: remote)
+        // Keychain only when a password is known to exist: a lookup for a remote
+        // that has none can surface an authorization prompt in a GUI session —
+        // invisible, modal, and one per poll — which stalls this thread and with
+        // it the entire poll loop.
+        let password = Self.loadRemoteSettings()[remote]?.hasPassword == true
+            ? KeychainHelper.getPassword(for: remote)
+            : nil
 
         // ClearAllForwardings: a one-shot command needs none of the user's
         // DynamicForward/RemoteForward config, and rebuilding those every poll would
-        // race the user's own sessions holding them. ControlMaster=auto with a short
-        // persist reuses the connection across polls — on proxied links (ProxyCommand)
-        // that turns a multi-second handshake into milliseconds. `auto` also means an
-        // existing master from the user's own terminal is reused, never contested.
+        // race the user's own sessions holding them.
+        //
+        // No ControlMaster/ControlPersist on purpose: the persist master forks away
+        // from the command ssh and keeps the inherited stdout pipe open, and a poll
+        // every few seconds keeps resetting its persist timer — the master never
+        // exits, readDataToEndOfFile never sees EOF, and every poll thread from then
+        // on hangs in read() forever. One full handshake per command is the price.
         let connectionOptions = [
             "-o", "ConnectTimeout=5",
-            "-o", "ClearAllForwardings=yes",
-            "-o", "ControlMaster=auto",
-            "-o", "ControlPersist=10s"
+            "-o", "ClearAllForwardings=yes"
         ]
 
         if let password, FileManager.default.fileExists(atPath: "/opt/homebrew/bin/sshpass") {
@@ -250,11 +265,23 @@ final class RelayConnection {
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
         do {
             try process.run()
+            // Watchdog: a subprocess that neither exits nor closes its pipe (hung
+            // network, wedged proxy chain) must never pin this thread — readDataToEndOfFile
+            // has no timeout of its own. 20s covers ConnectTimeout + a slow herdr start.
+            DispatchQueue.global().asyncAfter(deadline: .now() + 20) { [process] in
+                if process.isRunning { process.terminate() }
+            }
+            // Read BEFORE waiting: waitUntilExit first is the classic pipe deadlock —
+            // a child blocked writing past the 64KB buffer and a parent blocked in
+            // waitUntilExit watch each other forever. readDataToEndOfFile returns at
+            // EOF, which the child's exit produces, so this orders itself correctly.
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
             guard process.terminationStatus == 0 else { return "" }
-            return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            return String(data: data, encoding: .utf8) ?? ""
         } catch { return "" }
     }
 
@@ -262,10 +289,11 @@ final class RelayConnection {
         guard !remote.isEmpty, !remotes.contains(remote) else { return }
         remotes.append(remote)
         UserDefaults.standard.set(remotes, forKey: "herdi_remotes")
-        if let password, !password.isEmpty {
-            KeychainHelper.setPassword(password, for: remote)
+        let storedPassword = password.flatMap { $0.isEmpty ? nil : $0 }
+        if let storedPassword {
+            KeychainHelper.setPassword(storedPassword, for: remote)
         }
-        saveRemoteSettings(remote, label: label, herdrPath: herdrPath)
+        saveRemoteSettings(remote, label: label, herdrPath: herdrPath, hasPassword: storedPassword != nil)
     }
 
     func removeRemote(_ remote: String) {
@@ -282,6 +310,11 @@ final class RelayConnection {
     struct RemoteSettings: Codable {
         var label: String?
         var herdrPath: String?
+        // Whether a password was ever stored for this remote. Keychain lookups from a
+        // GUI process can block on an authorization prompt nobody sees — and one hung
+        // lookup per remote poll starves the whole poll loop — so a remote with no
+        // password never touches the Keychain at all.
+        var hasPassword: Bool?
     }
 
     /// Per-remote extras keyed by the SSH target string. `herdi_remotes` stays a plain
@@ -299,14 +332,15 @@ final class RelayConnection {
         }
     }
 
-    private func saveRemoteSettings(_ remote: String, label: String?, herdrPath: String?) {
+    private func saveRemoteSettings(_ remote: String, label: String?, herdrPath: String?, hasPassword: Bool? = nil) {
         var settings = Self.loadRemoteSettings()
-        let existing = settings[remote] ?? RemoteSettings(label: nil, herdrPath: nil)
+        let existing = settings[remote] ?? RemoteSettings(label: nil, herdrPath: nil, hasPassword: nil)
         let trimmed = (label ?? "").trimmingCharacters(in: .whitespaces)
         let bin = (herdrPath ?? "").trimmingCharacters(in: .whitespaces)
         settings[remote] = RemoteSettings(
             label: trimmed.isEmpty ? nil : trimmed,
-            herdrPath: bin.isEmpty ? nil : bin
+            herdrPath: bin.isEmpty ? nil : bin,
+            hasPassword: hasPassword ?? existing.hasPassword
         )
         Self.storeRemoteSettings(settings)
     }
@@ -340,7 +374,9 @@ final class RelayConnection {
         let bin = (herdrPath?.trimmingCharacters(in: .whitespaces).isEmpty == false)
             ? herdrPath!.trimmingCharacters(in: .whitespaces)
             : "herdr"
-        let password = KeychainHelper.getPassword(for: remote)
+        let password = Self.loadRemoteSettings()[remote]?.hasPassword == true
+            ? KeychainHelper.getPassword(for: remote)
+            : nil
         if password != nil && !FileManager.default.fileExists(atPath: "/opt/homebrew/bin/sshpass") {
             return .sshpassMissing
         }
@@ -428,10 +464,16 @@ final class RelayConnection {
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
         do {
             try process.run()
+            DispatchQueue.global().asyncAfter(deadline: .now() + 10) { [process] in
+                if process.isRunning { process.terminate() }
+            }
+            // Read before wait — see runSSH for the deadlock this orders away.
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
-            return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            return String(data: data, encoding: .utf8) ?? ""
         } catch {
             return ""
         }
