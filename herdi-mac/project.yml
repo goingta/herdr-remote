@@ -12,13 +12,12 @@ targets:
       - path: Sources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.dcolinmorgan.herdi
+        PRODUCT_BUNDLE_IDENTIFIER: com.goingta.herdi
         MARKETING_VERSION: "0.8.1"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.9"
-        DEVELOPMENT_TEAM: ""
+        DEVELOPMENT_TEAM: "NHN8A752UN"
         CODE_SIGN_STYLE: Automatic
-        CODE_SIGN_IDENTITY: "-"
         ENABLE_HARDENED_RUNTIME: false
         INFOPLIST_KEY_LSUIElement: true
         GENERATE_INFOPLIST_FILE: true
@@ -28,7 +27,7 @@ targets:
         com.apple.security.app-sandbox: false
         com.apple.security.network.client: true
         com.apple.security.application-groups:
-          - group.com.dcolinmorgan.herdi
+          - group.com.goingta.herdi
     dependencies:
       - target: HerdiWidget
         embed: true
@@ -41,21 +40,20 @@ targets:
       - path: Sources/Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.dcolinmorgan.herdi.widget
+        PRODUCT_BUNDLE_IDENTIFIER: com.goingta.herdi.widget
         MARKETING_VERSION: "0.8.1"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.9"
-        DEVELOPMENT_TEAM: ""
+        DEVELOPMENT_TEAM: "NHN8A752UN"
         CODE_SIGN_STYLE: Automatic
-        CODE_SIGN_IDENTITY: "-"
         ENABLE_HARDENED_RUNTIME: false
         GENERATE_INFOPLIST_FILE: true
     entitlements:
       path: HerdiWidget.entitlements
       properties:
-        com.apple.security.app-sandbox: false
+        com.apple.security.app-sandbox: true
         com.apple.security.application-groups:
-          - group.com.dcolinmorgan.herdi
+          - group.com.goingta.herdi
     info:
       path: Widget/Info.plist
       properties:

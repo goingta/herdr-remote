@@ -35,7 +35,7 @@ struct HerdiSnapshot: Codable {
 
     static let appGroupKey = "herdi_snapshot"
 
-    private static let suite = "group.com.dcolinmorgan.herdi"
+    private static let suite = "group.com.goingta.herdi"
 
     static func save(_ snapshot: HerdiSnapshot) {
         guard let data = try? JSONEncoder().encode(snapshot) else { return }

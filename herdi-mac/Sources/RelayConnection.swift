@@ -29,11 +29,33 @@ final class RelayConnection {
 
     init() {
         herdrPath = resolveHerdrPath()
+        migrateLegacyConfig()
         // Load saved remotes
         if let saved = UserDefaults.standard.stringArray(forKey: "herdi_remotes") {
             remotes = saved
         }
         startDirect()
+    }
+
+    /// The bundle id changed (com.dcolinmorgan.herdi -> com.goingta.herdi) when real
+    /// development signing arrived — the old ids are registered to the original
+    /// author's team and a personal team cannot claim them. Pull the hand-set
+    /// configuration across once so an in-place upgrade keeps its remotes.
+    private func migrateLegacyConfig() {
+        guard let legacy = UserDefaults(suiteName: "com.dcolinmorgan.herdi") else { return }
+        let cur = UserDefaults.standard
+        if cur.stringArray(forKey: "herdi_remotes") == nil,
+           let old = legacy.stringArray(forKey: "herdi_remotes") {
+            cur.set(old, forKey: "herdi_remotes")
+        }
+        if cur.data(forKey: "herdi_remote_settings") == nil,
+           let old = legacy.data(forKey: "herdi_remote_settings") {
+            cur.set(old, forKey: "herdi_remote_settings")
+        }
+        if cur.string(forKey: "herdi_herdr_path") == nil,
+           let old = legacy.string(forKey: "herdi_herdr_path") {
+            cur.set(old, forKey: "herdi_herdr_path")
+        }
     }
 
     /// Resolve herdr binary: UserDefaults override → HERDR_BIN env → PATH lookup → common locations
