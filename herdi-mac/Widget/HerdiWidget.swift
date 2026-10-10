@@ -120,7 +120,7 @@ struct HerdiWidgetView: View {
             || session.lowercased() == a.agent.lowercased()
             || session.lowercased() == "claude code"
             || session.lowercased() == "codex"
-        return isBanner ? project : "【\(project) · \(session)】"
+        return isBanner ? project : "\(project) · \(session)"
     }
 
     private func badge(_ n: Int, color: Color, icon: String) -> some View {
