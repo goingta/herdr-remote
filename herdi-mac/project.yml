@@ -22,6 +22,7 @@ targets:
     info:
       path: Sources/Info.plist
       properties:
+        CFBundleShortVersionString: "0.8.1"
         LSUIElement: true
         CFBundleURLTypes:
           - CFBundleURLName: com.goingta.herdi.focus
