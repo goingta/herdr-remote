@@ -34,6 +34,39 @@ class HerdiAppDelegate: NSObject, NSApplicationDelegate {
         observeBlockedAgents()
     }
 
+    /// Widget deep link: herdi://focus?agent=<urlencoded Agent.id> —
+    /// the Work Handoff. Focus herdr onto the agent, then surface the terminal
+    /// host window so the user is looking at the work.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.scheme?.lowercased() == "herdi" {
+            guard url.host?.lowercased() == "focus",
+                  let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                  let agentId = components.queryItems?.first(where: { $0.name == "agent" })?.value,
+                  !agentId.isEmpty else { continue }
+            performHandoff(agentId: agentId)
+        }
+    }
+
+    private func performHandoff(agentId: String) {
+        let host = TerminalHost.selected
+        let activated = host.activate()
+        relay.focusPane(agentId)
+        if !activated {
+            postHandoffNotice(
+                title: "\(host.displayName) not found",
+                body: "Installed the app? Focused herdr onto the agent anyway."
+            )
+        }
+    }
+
+    private func postHandoffNotice(title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
+
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
@@ -105,6 +138,21 @@ class HerdiAppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
+        // Terminal Host (Work Handoff target)
+        let hostHeader = NSMenuItem(title: "Terminal Host", action: nil, keyEquivalent: "")
+        hostHeader.isEnabled = false
+        menu.addItem(hostHeader)
+        let selected = TerminalHost.selected
+        for host in TerminalHost.allCases {
+            let item = NSMenuItem(title: "  \(host.displayName)" + (host == selected ? " ✓" : ""),
+                                  action: #selector(selectTerminalHost(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = host.rawValue
+            menu.addItem(item)
+        }
+
+        menu.addItem(.separator())
+
         // Launch at login
         let launchItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         launchItem.target = self
@@ -156,6 +204,12 @@ class HerdiAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func removeRemote(_ sender: NSMenuItem) {
         guard let remote = sender.representedObject as? String else { return }
         relay.removeRemote(remote)
+        rebuildMenu()
+    }
+
+    @objc private func selectTerminalHost(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let host = TerminalHost(rawValue: raw) else { return }
+        TerminalHost.select(host)
         rebuildMenu()
     }
 

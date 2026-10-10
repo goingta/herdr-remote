@@ -65,17 +65,46 @@ struct HerdiWidgetView: View {
         VStack(alignment: .leading, spacing: 8) {
             countsRow(s)
             if !s.agents.isEmpty {
-                ForEach(s.agents.prefix(maxRows), id: \.self) { a in
-                    agentRow(a)
-                }
-                if s.agents.count > maxRows {
-                    Text("+\(s.agents.count - maxRows) more")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                // small has no rows worth tapping individually: whole-widget opens the
+                // default target (same rank order as the rows, so it equals row one).
+                if family == .systemSmall {
+                    contentBody(s)
+                        .widgetURL(handoffURL(for: s.agents.first))
+                } else {
+                    contentBody(s)
                 }
             }
             Spacer(minLength: 0)
         }
+    }
+
+    @ViewBuilder
+    private func contentBody(_ s: HerdiSnapshot) -> some View {
+        // medium/large: per-row Link (widgetURL is whole-widget only). small's
+        // single target goes through .widgetURL on the container above.
+        ForEach(s.agents.prefix(maxRows), id: \.self) { a in
+            agentRow(a)
+                .background {
+                    Link(destination: handoffURL(for: a)) { Color.clear }
+                }
+        }
+        if s.agents.count > maxRows {
+            Text("+\(s.agents.count - maxRows) more")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// herdi://focus?agent=<urlencoded Agent.id> — the id is already the normalized
+    /// identity (local bare, remote "host:pane"), so the deep link needs no extra
+    /// mapping. Rows without an id (old cached snapshots) get no tap target.
+    private func handoffURL(for agent: WidgetAgent?) -> URL {
+        guard let agent, let id = agent.id else {
+            return URL(string: "herdi://focus")!
+        }
+        var components = URLComponents(string: "herdi://focus")!
+        components.queryItems = [URLQueryItem(name: "agent", value: id)]
+        return components.url!
     }
 
     private func countsRow(_ s: HerdiSnapshot) -> some View {

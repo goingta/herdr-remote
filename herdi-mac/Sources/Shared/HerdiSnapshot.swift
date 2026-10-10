@@ -7,11 +7,14 @@ import Foundation
 /// Both targets compile this file; the fields are the stable string contract across
 /// that boundary, so keep them Codable-stable.
 struct WidgetAgent: Codable, Hashable {
+    // The app's normalized Agent.id (local bare pane id, remote "host:pane") —
+    // what the deep link hands back to the app for focusing. Snapshots cached by
+    // older builds lack it (nil): rows then render without a tap target.
+    var id: String?
     var agent: String
     var project: String
     var status: String
-    // herdr's stripped terminal title — the live task name. Old cached snapshots
-    // decode fine without it (nil).
+    // herdr's stripped terminal title — the live task name.
     var session: String?
 
     /// Sort rank: the neediest first, matching the herd list's ordering idea.

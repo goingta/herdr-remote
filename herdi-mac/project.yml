@@ -19,8 +19,14 @@ targets:
         DEVELOPMENT_TEAM: "NHN8A752UN"
         CODE_SIGN_STYLE: Automatic
         ENABLE_HARDENED_RUNTIME: false
-        INFOPLIST_KEY_LSUIElement: true
-        GENERATE_INFOPLIST_FILE: true
+    info:
+      path: Sources/Info.plist
+      properties:
+        LSUIElement: true
+        CFBundleURLTypes:
+          - CFBundleURLName: com.goingta.herdi.focus
+            CFBundleURLSchemes:
+              - herdi
     entitlements:
       path: Herdi.entitlements
       properties:
