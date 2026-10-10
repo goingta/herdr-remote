@@ -95,16 +95,10 @@ struct HerdiWidgetView: View {
         }
     }
 
-    /// herdi://focus?agent=<urlencoded Agent.id> — the id is already the normalized
-    /// identity (local bare, remote "host:pane"), so the deep link needs no extra
-    /// mapping. Rows without an id (old cached snapshots) get no tap target.
+    /// The shared handoff link (HandoffURL). Rows without an id (old cached
+    /// snapshots) fall back to the bare URL, which the app treats as a no-op.
     private func handoffURL(for agent: WidgetAgent?) -> URL {
-        guard let agent, let id = agent.id else {
-            return URL(string: "herdi://focus")!
-        }
-        var components = URLComponents(string: "herdi://focus")!
-        components.queryItems = [URLQueryItem(name: "agent", value: id)]
-        return components.url!
+        HandoffURL.make(agentId: agent?.id)
     }
 
     private func countsRow(_ s: HerdiSnapshot) -> some View {

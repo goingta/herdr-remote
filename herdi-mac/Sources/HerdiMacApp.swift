@@ -38,25 +38,25 @@ class HerdiAppDelegate: NSObject, NSApplicationDelegate {
     /// the Work Handoff. Focus herdr onto the agent, then surface the terminal
     /// host window so the user is looking at the work.
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls where url.scheme?.lowercased() == "herdi" {
-            guard url.host?.lowercased() == "focus",
-                  let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-                  let agentId = components.queryItems?.first(where: { $0.name == "agent" })?.value,
-                  !agentId.isEmpty else { continue }
+        for url in urls {
+            guard let agentId = HandoffURL.agentId(in: url) else { continue }
             performHandoff(agentId: agentId)
         }
     }
 
     private func performHandoff(agentId: String) {
-        let host = TerminalHost.selected
-        let activated = host.activate()
-        relay.focusPane(agentId)
-        if !activated {
-            postHandoffNotice(
-                title: "\(host.displayName) not found",
-                body: "Installed the app? Focused herdr onto the agent anyway."
-            )
+        let terminalHost = TerminalHost.selected
+        terminalHost.activate { installed in
+            if !installed {
+                Task { @MainActor in
+                    self.postHandoffNotice(
+                        title: "\(terminalHost.displayName) not found",
+                        body: "Installed the app? Focused herdr onto the agent anyway."
+                    )
+                }
+            }
         }
+        relay.focusPane(agentId)
     }
 
     private func postHandoffNotice(title: String, body: String) {
@@ -64,7 +64,11 @@ class HerdiAppDelegate: NSObject, NSApplicationDelegate {
         content.title = title
         content.body = body
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                NSLog("Herdi handoff notice failed: \(error)")
+            }
+        }
     }
 
     private func setupStatusItem() {

@@ -44,15 +44,23 @@ enum TerminalHost: String, CaseIterable {
     /// no TCC prompt, works from any process context. Pane-level targeting (Ghostty
     /// AppleScript `focus <terminal>` by tty) is a strategy refinement pending the
     /// pane→ssh-process mapping; see the Wayfinder map's fog notes.
-    /// Returns false when the host app is not installed.
-    @discardableResult
-    func activate() -> Bool {
+    /// `completion(false)` when the host app is not installed; the async launch
+    /// result is also observed, so a failed launch surfaces instead of vanishing.
+    func activate(completion: ((Bool) -> Void)? = nil) {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
-            return false
+            completion?(false)
+            return
         }
-        // activateApplication is app-level (all windows with .activateAllWindows is
-        // NOT set: bring the main/key window, matching "last attached session").
-        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
-        return true
+        let configuration = NSWorkspace.OpenConfiguration()
+        // .activateAllWindows would surface every window; leaving it off matches
+        // "bring the session the user last had forward".
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { app, error in
+            if let error {
+                NSLog("Herdi host activation failed for \(self.displayName): \(error)")
+                completion?(false)
+            } else {
+                completion?(true)
+            }
+        }
     }
 }

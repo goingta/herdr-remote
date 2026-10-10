@@ -82,8 +82,29 @@ final class Updater {
 
         latestVersion = version
         downloadURL = dmgURL.flatMap { URL(string: $0) }
-        updateAvailable = version != currentVersion && downloadURL != nil
+        // "Update available" means the release is newer, not merely different:
+        // a local build ahead of the releases page must not read 0.8.1 -> 0.8.0.
+        updateAvailable = isNewerVersion(version, than: currentVersion) && downloadURL != nil
         status = updateAvailable ? "v\(version) available" : "v\(currentVersion) ✓"
+    }
+
+    /// Dotted-numeric comparison; a version with a non-numeric segment falls
+    /// back to string inequality so the prompt never regresses to invisible.
+    private func isNewerVersion(_ candidate: String, than current: String) -> Bool {
+        let cand = candidate.split(separator: ".").map(String.init)
+        let curr = current.split(separator: ".").map(String.init)
+        let candNums = cand.compactMap(Int.init)
+        let currNums = curr.compactMap(Int.init)
+        guard candNums.count == cand.count, currNums.count == curr.count,
+              !candNums.isEmpty, !currNums.isEmpty else {
+            return candidate != current
+        }
+        for i in 0..<max(candNums.count, currNums.count) {
+            let c = i < candNums.count ? candNums[i] : 0
+            let r = i < currNums.count ? currNums[i] : 0
+            if c != r { return c > r }
+        }
+        return false
     }
 
     func performUpdate() {
