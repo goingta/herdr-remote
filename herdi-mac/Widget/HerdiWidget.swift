@@ -83,10 +83,15 @@ struct HerdiWidgetView: View {
         // medium/large: per-row Link (widgetURL is whole-widget only). small's
         // single target goes through .widgetURL on the container above.
         ForEach(s.agents.prefix(maxRows), id: \.self) { a in
-            agentRow(a)
-                .background {
-                    Link(destination: handoffURL(for: a)) { Color.clear }
+            // Standard form: the row content IS the link label. A background-
+            // Link-with-clear-fill variant fails hit-testing on macOS widgets.
+            if let url = handoffURL(for: a) as URL? {
+                Link(destination: url) {
+                    agentRow(a)
                 }
+            } else {
+                agentRow(a)
+            }
         }
         if s.agents.count > maxRows {
             Text("+\(s.agents.count - maxRows) more")
