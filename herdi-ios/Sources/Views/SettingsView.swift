@@ -3,7 +3,8 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(RelayConnection.self) private var relay
     @Environment(\.dismiss) private var dismiss
-    @State private var manualHost = ""
+    @State private var manualHost = relay.hostAddress
+    @State private var manualToken = relay.token
 
     var body: some View {
         NavigationStack {
@@ -23,14 +24,19 @@ struct SettingsView: View {
                             Text("Host")
                             Spacer()
                             Text(relay.hostAddress).foregroundStyle(.secondary).font(.caption)
+                                .lineLimit(1).truncationMode(.middle)
                         }
                     }
                 }
                 Section("Manual Connect") {
-                    TextField("ws://192.168.1.x:8375", text: $manualHost)
+                    TextField("wss://xxx.trycloudflare.com", text: $manualHost)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    SecureField("Token (if relay requires one)", text: $manualToken)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     Button("Connect") {
+                        relay.token = manualToken
                         relay.connect(to: manualHost)
                     }
                     .disabled(manualHost.isEmpty)

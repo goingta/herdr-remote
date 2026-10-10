@@ -13,7 +13,12 @@ enum ConnectionState: Equatable {
 final class RelayConnection {
     var agents: [Agent] = []
     var connectionState: ConnectionState = .disconnected
-    var hostAddress: String = ""
+    var hostAddress: String = "" {
+        didSet { UserDefaults.standard.set(hostAddress, forKey: "relay_host") }
+    }
+    var token: String = "" {
+        didSet { UserDefaults.standard.set(token, forKey: "relay_token") }
+    }
     var paneHistory: [String: String] = [:]
 
     var isConnected: Bool { connectionState == .connected }
@@ -26,6 +31,13 @@ final class RelayConnection {
     private var reconnectTask: Task<Void, Never>?
 
     init() {
+        // @Observable requirements are synthesized after init; restoring persisted state here
+        // means a cold launch reconnects on its own (PathMonitor picks hostAddress up).
+        hostAddress = UserDefaults.standard.string(forKey: "relay_host") ?? ""
+        token = UserDefaults.standard.string(forKey: "relay_token") ?? ""
+        if !hostAddress.isEmpty {
+            connect(to: hostAddress)
+        }
         startBrowsing()
         startPathMonitor()
     }
@@ -55,7 +67,7 @@ final class RelayConnection {
     func startBrowsing() {
         let params = NWParameters()
         params.includePeerToPeer = true
-        browser = NWBrowser(for: .bonjour(type: "_herdi._tcp", domain: nil), using: params)
+        browser = NWBrowser(for: .bonjour(type: "_herdr-remote._tcp", domain: nil), using: params)
         browser?.browseResultsChangedHandler = { [weak self] results, _ in
             guard let result = results.first else { return }
             if case let .service(name, type, domain, _) = result.endpoint {
@@ -84,8 +96,17 @@ final class RelayConnection {
     // MARK: - WebSocket
 
     func connect(to urlString: String) {
-        guard let url = URL(string: urlString) else { return }
+        guard let base = URL(string: urlString) else { return }
         hostAddress = urlString
+        // Relay token auth accepts ?token=; appending here keeps it out of the UI's stored
+        // display path only in spirit — hostAddress persists with the token embedded, which
+        // is the same trade the relay's own share-link workaround makes.
+        var url = base
+        if !token.isEmpty, var components = URLComponents(url: base, resolvingAgainstBaseURL: false) {
+            let items = (components.queryItems ?? []).filter { $0.name != "token" }
+            components.queryItems = items + [URLQueryItem(name: "token", value: token)]
+            if let withToken = components.url { url = withToken }
+        }
         reconnectTask?.cancel()
         task?.cancel()
         connectionState = .connecting
