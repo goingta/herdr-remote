@@ -7,8 +7,37 @@ struct HerdiApp: App {
     @NSApplicationDelegateAdaptor(HerdiAppDelegate.self) var appDelegate
 
     var body: some Scene {
-        // No visible window — the panel IS the UI; Add Remote uses its own NSWindow
-        Settings { EmptyView() }
+        // No visible window — the panel IS the UI; Add Remote uses its own NSWindow.
+        // The onOpenURL here is the SwiftUI-lifecycle route for the widget deep
+        // link: whether the GET-URL event reaches the adaptor delegate's
+        // application(_:open:) is version-dependent under SwiftUI App, so both
+        // entrances are armed — performHandoff is idempotent, double delivery is
+        // just two redundant focus commands.
+        Settings {
+            EmptyView()
+                .onOpenURL { url in
+                    appDelegate.handleHandoffURL(url)
+                }
+        }
+    }
+}
+
+@MainActor
+enum StatusBarIcon {
+    /// The herdr goat head, from `web/logo.svg`, rasterised to the imageset.
+    /// Template rendering lets macOS re-colour it for the menu bar's appearance.
+    static let idle = NSImage(named: "StatusBarIcon")
+    /// Disconnected state: the same goat at reduced alpha — the outline circle
+    /// it replaces read as a second "shape language" next to the goat.
+    static var disconnected: NSImage? {
+        guard let base = idle else { return nil }
+        let tinted = NSImage(size: base.size, flipped: false) { rect in
+            NSGraphicsContext.current?.cgContext.setAlpha(0.4)
+            base.draw(in: rect)
+            return true
+        }
+        tinted.isTemplate = true
+        return tinted
     }
 }
 
@@ -39,9 +68,13 @@ class HerdiAppDelegate: NSObject, NSApplicationDelegate {
     /// host window so the user is looking at the work.
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
-            guard let agentId = HandoffURL.agentId(in: url) else { continue }
-            performHandoff(agentId: agentId)
+            handleHandoffURL(url)
         }
+    }
+
+    func handleHandoffURL(_ url: URL) {
+        guard let agentId = HandoffURL.agentId(in: url) else { return }
+        performHandoff(agentId: agentId)
     }
 
     private func performHandoff(agentId: String) {
@@ -74,8 +107,9 @@ class HerdiAppDelegate: NSObject, NSApplicationDelegate {
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "Herdi")
+            button.image = StatusBarIcon.idle
             button.image?.size = NSSize(width: 14, height: 14)
+            button.setAccessibilityLabel("Herdi")
         }
         rebuildMenu()
     }
@@ -263,8 +297,9 @@ class HerdiAppDelegate: NSObject, NSApplicationDelegate {
                         button.image?.size = NSSize(width: 16, height: 16)
                         button.contentTintColor = .systemRed
                     } else {
-                        button.image = NSImage(systemSymbolName: self.relay.isConnected ? "circle.fill" : "circle", accessibilityDescription: "Herdi")
+                        button.image = self.relay.isConnected ? StatusBarIcon.idle : StatusBarIcon.disconnected
                         button.image?.size = NSSize(width: 14, height: 14)
+                        button.setAccessibilityLabel("Herdi")
                         button.contentTintColor = nil
                     }
                 }
