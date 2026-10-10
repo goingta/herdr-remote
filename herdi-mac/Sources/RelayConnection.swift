@@ -272,13 +272,24 @@ final class RelayConnection {
             "-o", "ClearAllForwardings=yes"
         ]
 
+        // ssh hands everything after the host to the REMOTE shell, which re-splits
+        // argv on whitespace and newline. Unquoted, "yes, single permission\n"
+        // arrived as three words plus a second shell command — the newline that
+        // submits the reply never reached herdr, so Allow/Trust/Deny did nothing
+        // and the approval prompt re-fired. shlex-quote each argument, matching
+        // what the relay does (_invoke_herdr, PR #77's fix).
+        func shquote(_ s: String) -> String {
+            "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        }
+        let remoteArgs = args.map(shquote)
+
         if let password, FileManager.default.fileExists(atPath: "/opt/homebrew/bin/sshpass") {
             // Use sshpass for password auth
             process.executableURL = URL(fileURLWithPath: "/opt/homebrew/bin/sshpass")
-            process.arguments = ["-p", password, "ssh", "-o", "StrictHostKeyChecking=no"] + connectionOptions + [remote] + args
+            process.arguments = ["-p", password, "ssh", "-o", "StrictHostKeyChecking=no"] + connectionOptions + [remote] + remoteArgs
         } else {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-            process.arguments = ["-o", "BatchMode=yes"] + connectionOptions + [remote] + args
+            process.arguments = ["-o", "BatchMode=yes"] + connectionOptions + [remote] + remoteArgs
         }
 
         let pipe = Pipe()
