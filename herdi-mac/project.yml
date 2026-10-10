@@ -27,6 +27,8 @@ targets:
       properties:
         com.apple.security.app-sandbox: false
         com.apple.security.network.client: true
+        com.apple.security.application-groups:
+          - group.com.dcolinmorgan.herdi
     dependencies:
       - target: HerdiWidget
         embed: true
@@ -51,7 +53,9 @@ targets:
     entitlements:
       path: HerdiWidget.entitlements
       properties:
-        com.apple.security.app-sandbox: true
+        com.apple.security.app-sandbox: false
+        com.apple.security.application-groups:
+          - group.com.dcolinmorgan.herdi
     info:
       path: Widget/Info.plist
       properties:
