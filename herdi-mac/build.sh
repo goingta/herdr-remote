@@ -19,15 +19,20 @@ fi
 echo "▸ Generating Xcode project..."
 xcodegen generate
 
-echo "▸ Building (Release)..."
+echo "▸ Building (Release, development-signed)..."
+# The widget is sandboxed, and a sandboxed extension's App Group access is only
+# granted with a real provisioning profile — ad-hoc signing (what this script did
+# before) leaves the widget reading an empty suite forever. Automatic signing with
+# the local Apple Development identity lets xcodebuild generate that profile.
+# -allowProvisioningUpdates lets it register the App Group and fetch profiles
+# without opening Xcode.
 xcodebuild \
     -project Herdi.xcodeproj \
     -scheme Herdi \
     -configuration Release \
     -derivedDataPath .build/xcode \
+    -allowProvisioningUpdates \
     build \
-    CODE_SIGN_IDENTITY="-" \
-    CODE_SIGNING_REQUIRED=YES \
     | tail -20
 
 BUILT_APP=".build/xcode/Build/Products/Release/$APP_NAME.app"

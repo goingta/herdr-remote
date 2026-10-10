@@ -208,12 +208,17 @@ final class RelayConnection {
             idle: rows.filter { $0.status == "idle" || $0.status == "unknown" }.count,
             agents: rows.sorted { ($0.rank, $0.project) < ($1.rank, $1.project) }
         )
-        if let current = HerdiSnapshot.load(), current.blocked == snapshot.blocked,
+        // Change detection reads the App Group suite only.
+        if let current = HerdiSnapshot.loadFromSuite(), current.blocked == snapshot.blocked,
            current.working == snapshot.working, current.done == snapshot.done,
            current.idle == snapshot.idle, current.agents == snapshot.agents {
             return
         }
         HerdiSnapshot.save(snapshot)
+        // The widget reads the app's own defaults domain through the shared-preference
+        // temporary exception, so this native write IS the data delivery — no
+        // cross-container paths involved.
+        UserDefaults.standard.set(snapshot.agents.count, forKey: "herdi_snapshot_written_count")
         WidgetCenter.shared.reloadAllTimelines()
     }
 

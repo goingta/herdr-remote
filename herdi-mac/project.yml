@@ -54,6 +54,12 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.application-groups:
           - group.com.goingta.herdi
+        # Read the menu-bar app's own defaults domain. The App Group container
+        # binding never materialises for an unsandboxed host on a free team, and
+        # cross-container writes are redirected by TCC — but the app natively
+        # owns this domain, and this exception lets the sandboxed widget read it.
+        com.apple.security.temporary-exception.shared-preference.read-only:
+          - com.goingta.herdi
     info:
       path: Widget/Info.plist
       properties:
