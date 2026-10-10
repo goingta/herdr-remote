@@ -72,3 +72,30 @@ targets:
       properties:
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
+
+  HerdiTests:
+    # Logic tests for the reply wire rules (shlexQuoted / replyPayload /
+    # detectOptions) — no host app, so they run without touching the keychain.
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/HerdiTests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: true
+        SWIFT_VERSION: "5.9"
+    dependencies:
+      - target: Herdi
+
+schemes:
+  Herdi:
+    build:
+      targets:
+        Herdi: all
+        HerdiTests: [test]
+    run:
+      config: Release
+    test:
+      config: Debug
+      targets:
+        - HerdiTests

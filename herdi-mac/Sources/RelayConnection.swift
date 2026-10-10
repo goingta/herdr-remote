@@ -250,6 +250,23 @@ final class RelayConnection {
         }
     }
 
+    // MARK: - Reply wire rules (pure, pinned by HerdiTests)
+
+    /// shlex-quote each argument: ssh hands everything after the host to the
+    /// remote shell, which re-splits argv on whitespace and newline.
+    static func shlexQuoted(_ args: [String]) -> [String] {
+        args.map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+    }
+
+    /// The bytes one reply puts on the wire. Shortcut-key replies (codex
+    /// approval menu: "y" / "p" / ESC) go bare — the dialog is already
+    /// confirmed by the time a trailing newline would arrive, and it lands in
+    /// the freshly emptied composer as a stray blank line. Word replies keep
+    /// the newline: for a text-answer prompt it is the Enter that submits.
+    static func replyPayload(_ text: String) -> String {
+        text.count <= 1 ? text : text + "\n"
+    }
+
     private func runSSH(_ remote: String, _ args: String...) -> String {
         let process = Process()
         // Keychain only when a password is known to exist: a lookup for a remote
@@ -280,10 +297,7 @@ final class RelayConnection {
         // submits the reply never reached herdr, so Allow/Trust/Deny did nothing
         // and the approval prompt re-fired. shlex-quote each argument, matching
         // what the relay does (_invoke_herdr, PR #77's fix).
-        func shquote(_ s: String) -> String {
-            "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        }
-        let remoteArgs = args.map(shquote)
+        let remoteArgs = Self.shlexQuoted(Array(args))
 
         if let password, FileManager.default.fileExists(atPath: "/opt/homebrew/bin/sshpass") {
             // Use sshpass for password auth
@@ -468,7 +482,7 @@ final class RelayConnection {
                 .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
                 .suffix(6)
             let content = lines.joined(separator: "\n")
-            let options = detectOptions(content)
+            let options = Self.detectOptions(content)
 
             DispatchQueue.main.async {
                 agent.prompt = String(content.prefix(500))
@@ -478,7 +492,7 @@ final class RelayConnection {
         }
     }
 
-    private func detectOptions(_ text: String) -> [String] {
+    static func detectOptions(_ text: String) -> [String] {
         let lower = text.lowercased()
         // Codex's approval menu is a key-select list ("1. Yes, proceed (y)"),
         // not a text prompt: the reply that works is the option's own shortcut
@@ -545,16 +559,10 @@ final class RelayConnection {
         if mode == .direct {
             DispatchQueue.global(qos: .userInitiated).async { [self] in
                 let paneId = response.pane_id
-                // Shortcut-key replies (codex approval menu: "y" / "p" / ESC) go
-                // out bare — the dialog is already confirmed by the time a
-                // trailing newline would arrive, and it lands in the freshly
-                // emptied composer as a stray blank line. Word replies keep the
-                // newline: for a text-answer prompt it is the Enter that submits.
-                let bare = response.text.count <= 1
-                let payload = bare ? response.text : response.text + "\n"
+                let payload = Self.replyPayload(response.text)
                 // The one trace of an outgoing reply: without it, a "clicked
                 // Allow, nothing happened" report has nothing to inspect.
-                sendLog.notice("reply pane=\(paneId, privacy: .public) bytes=\(payload.utf8.count, privacy: .public) bare=\(bare, privacy: .public) head=\(String(payload.prefix(12)).debugDescription, privacy: .public)")
+                sendLog.notice("reply pane=\(paneId, privacy: .public) bytes=\(payload.utf8.count, privacy: .public) bare=\(payload.count <= 1, privacy: .public) head=\(String(payload.prefix(12)).debugDescription, privacy: .public)")
                 // Check if this is a remote agent (id starts with "host:")
                 if let agent = agents.first(where: { $0.id == paneId }), agent.host != "local" {
                     let realId = String(paneId.drop(while: { $0 != ":" }).dropFirst())
