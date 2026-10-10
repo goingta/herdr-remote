@@ -26,6 +26,32 @@ struct WidgetAgent: Codable, Hashable {
         default: return 3
         }
     }
+
+    /// The row's display title: 【项目名 · Session Title】, bare project when the
+    /// session title is just the harness banner ("Claude Code") or empty — repeating
+    /// the agent column as a title wastes the row. Shared by the widget and the
+    /// notch panel so the two cannot drift apart about what a row is called.
+    var displayTitle: String {
+        WidgetAgent.displayTitle(project: project, agent: agent, session: session)
+    }
+
+    /// Static form for callers holding the app's own `Agent` model instead of a
+    /// `WidgetAgent` — same rule, single implementation.
+    static func displayTitle(project: String, agent: String, session: String?) -> String {
+        var session = (session ?? "").trimmingCharacters(in: .whitespaces)
+        // codex titles end in " | project" — herdr appends it, and we already show
+        // the project, so drop the tail before composing.
+        if session.hasSuffix("| " + project) {
+            session = String(session.dropLast(project.count + 2)).trimmingCharacters(in: .whitespaces)
+        } else if session.hasSuffix("|" + project) {
+            session = String(session.dropLast(project.count + 1)).trimmingCharacters(in: .whitespaces)
+        }
+        let isBanner = session.isEmpty
+            || session.lowercased() == agent.lowercased()
+            || session.lowercased() == "claude code"
+            || session.lowercased() == "codex"
+        return isBanner ? project : "\(project) · \(session)"
+    }
 }
 
 /// The whole payload the widget renders: counts for the small family, the list for

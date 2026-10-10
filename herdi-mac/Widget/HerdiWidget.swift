@@ -115,7 +115,7 @@ struct HerdiWidgetView: View {
             Circle()
                 .fill(color(for: a.status))
                 .frame(width: 7, height: 7)
-            Text(displayTitle(a))
+            Text(a.displayTitle)
                 .font(.caption)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -124,26 +124,6 @@ struct HerdiWidgetView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
-    }
-
-    /// 【项目 · 会话名】when herdr's title says something real; bare project when the
-    /// title is just the harness banner ("Claude Code") or empty — repeating the
-    /// agent column as a title wastes the row.
-    private func displayTitle(_ a: WidgetAgent) -> String {
-        var session = (a.session ?? "").trimmingCharacters(in: .whitespaces)
-        let project = a.project
-        // codex titles end in " | project" — herdr appends it, and we already show
-        // the project, so drop the tail before composing.
-        if session.hasSuffix("| " + project) {
-            session = String(session.dropLast(project.count + 2)).trimmingCharacters(in: .whitespaces)
-        } else if session.hasSuffix("|" + project) {
-            session = String(session.dropLast(project.count + 1)).trimmingCharacters(in: .whitespaces)
-        }
-        let isBanner = session.isEmpty
-            || session.lowercased() == a.agent.lowercased()
-            || session.lowercased() == "claude code"
-            || session.lowercased() == "codex"
-        return isBanner ? project : "\(project) · \(session)"
     }
 
     private func badge(_ n: Int, color: Color, icon: String) -> some View {
