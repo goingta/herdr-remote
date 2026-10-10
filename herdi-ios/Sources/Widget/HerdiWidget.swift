@@ -18,13 +18,10 @@ struct AgentStatusProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<AgentStatusEntry>) -> Void) {
-        // Read from shared UserDefaults (written by the main app)
-        let defaults = UserDefaults(suiteName: "group.com.goingta.herdi.ios")
-        let b = defaults?.integer(forKey: "blocked_count") ?? 0
-        let w = defaults?.integer(forKey: "working_count") ?? 0
-        let i = defaults?.integer(forKey: "idle_count") ?? 0
-        let entry = AgentStatusEntry(date: .now, blocked: b, working: w, idle: i)
-        let next = Calendar.current.date(byAdding: .second, value: 30, to: .now)!
+        // App Group dropped for free-provisioning; widget shows zeros until the group
+        // comes back. Counts stay in the main app.
+        let entry = AgentStatusEntry(date: .now, blocked: 0, working: 0, idle: 0)
+        let next = Calendar.current.date(byAdding: .minute, value: 30, to: .now)!
         completion(Timeline(entries: [entry], policy: .after(next)))
     }
 }

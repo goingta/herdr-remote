@@ -27,13 +27,8 @@ targets:
         UILaunchScreen: {}
         NSLocalNetworkUsageDescription: "Herdi discovers the relay daemon on your local network."
         NSBonjourServices:
-          - _herdi._tcp
+          - _herdr-remote._tcp
         NSSupportsLiveActivities: true
-    entitlements:
-      path: Sources/Herdi.entitlements
-      properties:
-        com.apple.security.application-groups:
-          - group.com.goingta.herdi.ios
     dependencies:
       - target: HerdiWidget
         embed: true
@@ -52,8 +47,3 @@ targets:
         SWIFT_VERSION: "5.9"
         DEVELOPMENT_TEAM: ""
         INFOPLIST_KEY_NSExtension_NSExtensionPointIdentifier: com.apple.widgetkit-extension
-    entitlements:
-      path: Sources/HerdiWidget.entitlements
-      properties:
-        com.apple.security.application-groups:
-          - group.com.goingta.herdi.ios
