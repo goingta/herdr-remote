@@ -254,7 +254,7 @@ final class RelayConnection {
         let working = agents.filter { $0.status == .working }.count
         let idle = agents.filter { $0.status == .idle || $0.status == .unknown }.count
         LiveActivityManager.shared.update(blocked: blocked, working: working, idle: idle)
-        let defaults = UserDefaults(suiteName: "group.com.dcolinmorgan.herdi")
+        let defaults = UserDefaults(suiteName: "group.com.goingta.herdi.ios")
         defaults?.set(blocked, forKey: "blocked_count")
         defaults?.set(working, forKey: "working_count")
         defaults?.set(idle, forKey: "idle_count")

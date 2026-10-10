@@ -1,6 +1,6 @@
 name: Herdi
 options:
-  bundleIdPrefix: com.dcolinmorgan
+  bundleIdPrefix: com.goingta
   deploymentTarget:
     iOS: "17.0"
   xcodeVersion: "16.0"
@@ -15,7 +15,7 @@ targets:
     settings:
       base:
         INFOPLIST_FILE: Sources/Info.plist
-        PRODUCT_BUNDLE_IDENTIFIER: com.dcolinmorgan.herdi
+        PRODUCT_BUNDLE_IDENTIFIER: com.goingta.herdi.ios
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.9"
@@ -33,7 +33,7 @@ targets:
       path: Sources/Herdi.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.dcolinmorgan.herdi
+          - group.com.goingta.herdi.ios
     dependencies:
       - target: HerdiWidget
         embed: true
@@ -46,7 +46,7 @@ targets:
       - path: Sources/LiveActivity/HerdiWidgetAttributes.swift
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.dcolinmorgan.herdi.widget
+        PRODUCT_BUNDLE_IDENTIFIER: com.goingta.herdi.ios.widget
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.9"
@@ -56,4 +56,4 @@ targets:
       path: Sources/HerdiWidget.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.dcolinmorgan.herdi
+          - group.com.goingta.herdi.ios

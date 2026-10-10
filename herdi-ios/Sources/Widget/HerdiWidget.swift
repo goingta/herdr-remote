@@ -19,7 +19,7 @@ struct AgentStatusProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<AgentStatusEntry>) -> Void) {
         // Read from shared UserDefaults (written by the main app)
-        let defaults = UserDefaults(suiteName: "group.com.dcolinmorgan.herdi")
+        let defaults = UserDefaults(suiteName: "group.com.goingta.herdi.ios")
         let b = defaults?.integer(forKey: "blocked_count") ?? 0
         let w = defaults?.integer(forKey: "working_count") ?? 0
         let i = defaults?.integer(forKey: "idle_count") ?? 0
