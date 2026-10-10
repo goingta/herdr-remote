@@ -12,6 +12,14 @@
 
 一个 herdr pane 里在跑的 coding agent（claude / codex 等）。id 跨 host 时带 host 前缀（`host:pane_id`）。没有 agent 的 pane 不算 Agent。
 
+## Session Title（会话标题）
+
+herdr 终端标题剥掉 harness 前缀后的实时任务名（如「Herdi 远端 SSH 配置入口」）。这是 Agent 当前在做什么的名字。它不是 herdr 的 session（实例选择）——那是一个运行时会话，Session Title 是标题字符串。闲时它只剩 harness banner（"Claude Code"），此时视为没有 Session Title。_Avoid_: session name、会话名（用户可见文案可用「会话名」）。
+
+## Display Title（显示标题）
+
+面向用户的行标题：`项目名 · Session Title`；没有真实 Session Title 时退化为裸项目名。Widget 行与 Notch 行共用同一组合规则。
+
 ## Direct / Relay
 
 mac app 的两种连接模式。**Direct**：app 自己 shell 出 `herdr pane list`（本机 + 每个 remote 经 SSH）。**Relay**：连 relay 的 WebSocket。配置入口设计针对 Direct 模式。

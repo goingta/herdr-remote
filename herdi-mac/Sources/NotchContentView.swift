@@ -445,23 +445,20 @@ private struct AgentSessionRow: View {
                 .fill(accentColor)
                 .frame(width: 3, height: 28)
 
-            // Agent info
+            // Agent info: display title leads, the agent name drops to the second
+            // line as the secondary fact — the same hierarchy the widget rows use.
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
-                    Text(agent.name)
+                    Text(WidgetAgent.displayTitle(project: agent.project.isEmpty ? agent.cwd : agent.project, agent: agent.name, session: agent.session))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.9))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                     if agent.host != "local" {
                         Image(systemName: "network")
                             .font(.system(size: 8))
                             .foregroundStyle(.green.opacity(0.6))
                     }
-                }
-                HStack(spacing: 4) {
-                    Text(agent.project.isEmpty ? agent.cwd : agent.project)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.4))
-                        .lineLimit(1)
                     if style == .blocked, let prompt = agent.prompt {
                         Text("— \(prompt.components(separatedBy: .newlines).last ?? "")")
                             .font(.system(size: 9, design: .monospaced))
@@ -469,6 +466,10 @@ private struct AgentSessionRow: View {
                             .lineLimit(1)
                     }
                 }
+                Text(agent.name)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .lineLimit(1)
             }
 
             Spacer()
@@ -553,14 +554,11 @@ private struct ApprovalCard: View {
                     .fill(.red)
                     .frame(width: 3, height: 14)
 
-                Text(agent.name)
+                Text(WidgetAgent.displayTitle(project: agent.project.isEmpty ? agent.cwd : agent.project, agent: agent.name, session: agent.session))
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.white)
-                Text("·")
-                    .foregroundStyle(.white.opacity(0.3))
-                Text(agent.project)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
 
                 Spacer()
 
