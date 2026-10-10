@@ -543,12 +543,19 @@ final class RelayConnection {
         if mode == .direct {
             DispatchQueue.global(qos: .userInitiated).async { [self] in
                 let paneId = response.pane_id
+                // Shortcut-key replies (codex approval menu: "y" / "p" / ESC) go
+                // out bare — the dialog is already confirmed by the time a
+                // trailing newline would arrive, and it lands in the freshly
+                // emptied composer as a stray blank line. Word replies keep the
+                // newline: for a text-answer prompt it is the Enter that submits.
+                let bare = response.text.count <= 1
+                let payload = bare ? response.text : response.text + "\n"
                 // Check if this is a remote agent (id starts with "host:")
                 if let agent = agents.first(where: { $0.id == paneId }), agent.host != "local" {
                     let realId = String(paneId.drop(while: { $0 != ":" }).dropFirst())
-                    _ = runSSH(agent.host, remoteHerdrBin(agent.host), "pane", "send-text", realId, response.text + "\n")
+                    _ = runSSH(agent.host, remoteHerdrBin(agent.host), "pane", "send-text", realId, payload)
                 } else {
-                    _ = runHerdr("pane", "send-text", paneId, response.text + "\n")
+                    _ = runHerdr("pane", "send-text", paneId, payload)
                 }
             }
 
