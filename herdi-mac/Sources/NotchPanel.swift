@@ -116,7 +116,6 @@ final class PanelWindowController: NSObject, NSWindowDelegate, ObservableObject 
     private let relay: RelayConnection
     @Published var surface: IslandSurface = .collapsed
     private var globalClickMonitor: Any?
-    private var fullscreenLatch = false
 
     init(relay: RelayConnection) {
         self.relay = relay
@@ -159,14 +158,6 @@ final class PanelWindowController: NSObject, NSWindowDelegate, ObservableObject 
             object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleScreenChange() }
-        }
-
-        // Fullscreen space detection
-        NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.activeSpaceDidChangeNotification,
-            object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.handleSpaceChange() }
         }
 
         // Global click: collapse expanded panel when clicking outside
@@ -222,38 +213,10 @@ final class PanelWindowController: NSObject, NSWindowDelegate, ObservableObject 
         self.hostingView = contentView
         panel?.contentView = contentView
         updatePosition()
-    }
-
-    private func handleSpaceChange() {
-        if isActiveSpaceFullscreen() {
-            fullscreenLatch = true
-            panel?.orderOut(nil)
-        } else {
-            if fullscreenLatch {
-                fullscreenLatch = false
-                panel?.orderFrontRegardless()
-            }
-        }
-    }
-
-    private func isActiveSpaceFullscreen() -> Bool {
-        guard let frontApp = NSWorkspace.shared.frontmostApplication,
-              frontApp.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return false }
-        let screen = ScreenDetector.preferredScreen
-        guard let windowList = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
-        ) as? [[String: Any]] else { return false }
-
-        for window in windowList {
-            guard let pid = window[kCGWindowOwnerPID as String] as? pid_t,
-                  pid == frontApp.processIdentifier,
-                  let layer = window[kCGWindowLayer as String] as? Int, layer == 0,
-                  let bounds = window[kCGWindowBounds as String] as? [String: Any],
-                  let w = bounds["Width"] as? CGFloat,
-                  let h = bounds["Height"] as? CGFloat else { continue }
-            if w >= screen.frame.width && h >= screen.frame.height { return true }
-        }
-        return false
+        // A dock/undock must never leave the panel offscreen — it is the
+        // agent list and the approval surface, visible in every state
+        // (docs/adr/0003).
+        panel?.orderFrontRegardless()
     }
 
     deinit {
