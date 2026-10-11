@@ -38,6 +38,7 @@ struct AgentMessage: Decodable {
     let agentData: AgentData?
     let project: String?
     let prompt: String?
+    let content: String?
     let options: [String]?
     let prompt_id: String?
     let multi_options: [String]?
@@ -56,7 +57,7 @@ struct AgentMessage: Decodable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case type, agents, pane_id, agent, project, prompt, options, prompt_id
+        case type, agents, pane_id, agent, project, prompt, content, options, prompt_id
         case multi_options, selected_options, interaction, multi, update
     }
 
@@ -67,6 +68,8 @@ struct AgentMessage: Decodable {
         pane_id = try? values.decode(String.self, forKey: .pane_id)
         project = try? values.decode(String.self, forKey: .project)
         prompt = try? values.decode(String.self, forKey: .prompt)
+        // relay's pane_content carries `content`; blocked carries `prompt`.
+        content = try? values.decode(String.self, forKey: .content)
         options = try? values.decode([String].self, forKey: .options)
         prompt_id = try? values.decode(String.self, forKey: .prompt_id)
         multi_options = try? values.decode([String].self, forKey: .multi_options)

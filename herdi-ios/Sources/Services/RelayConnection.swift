@@ -223,7 +223,7 @@ final class RelayConnection {
                 }
 
             case "pane_content":
-                if let pid = msg.pane_id, let content = msg.prompt {
+                if let pid = msg.pane_id, let content = msg.content {
                     paneHistory[pid] = content
                 }
 
