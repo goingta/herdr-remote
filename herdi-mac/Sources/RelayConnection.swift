@@ -480,7 +480,13 @@ final class RelayConnection {
             }
             let lines = raw.components(separatedBy: .newlines)
                 .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-                .suffix(6)
+                // 12, not 6: a claude numbered menu with wrapped description
+                // lines runs 8-10 rows, and a 6-row window clips the run's head
+                // off — detection then sees no run starting at 1 and the pane
+                // gets no buttons at all. The keyword branches (codex/omp/batch)
+                // match on contains, so a wider window costs nothing there; the
+                // prompt shown to the user still takes only the tail.
+                .suffix(12)
             let content = lines.joined(separator: "\n")
             let options = Self.detectOptions(content)
 

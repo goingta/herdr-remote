@@ -121,6 +121,24 @@ final class ReplyWireTests: XCTestCase {
         XCTAssertEqual(RelayConnection.detectOptions(screen), [])
     }
 
+    func testMenuWithDescriptionsAboveAClippedWindowStillParses() {
+        // A claude numbered menu with per-option descriptions runs ~10 rows; the
+        // read window (readPaneForBlocked keeps the last 12 non-empty lines) must
+        // hold the whole run — a window clipping "❯ 1." off the top left detection
+        // no run starting at 1, and the pane got no buttons at all.
+        let screen = """
+        Reason: the sandbox could not start. Allow the command?
+
+        ❯ 1. 删 App Group 先装上（推荐）
+             我把 entitlements 里的 App Group 删掉，立即可装
+          2. 你手动在 Xcode 注册
+             你在 mac 上打开 Xcode 手动注册，然后告诉我重试
+          3. No, and tell me what to do differently
+        Esc to cancel
+        """
+        XCTAssertEqual(RelayConnection.detectOptions(screen), ["1", "2", "3"])
+    }
+
     func testCodexMenuNeverYieldsDigits() {
         // Codex rows carry (y)/(p) markers; even with the footer clipped off the
         // read window the shortcut branch must win before numbered detection.
