@@ -52,4 +52,4 @@ if [ -f "$SCRIPT_DIR/Sources/Assets/AppIcon.icns" ] && [ ! -d "$SCRIPT_DIR/Sourc
 fi
 
 echo "✓ Built: $APP_DIR"
-echo "  To install: cp -R $APP_DIR /Applications/"
+echo "  To install: ./install.sh — guards against a stale dist or a newer installed build"
