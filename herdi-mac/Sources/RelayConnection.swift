@@ -498,7 +498,8 @@ final class RelayConnection {
         // not a text prompt: the reply that works is the option's own shortcut
         // key, and the rawValue doubles as the bytes send-text puts on the wire.
         // Option words typed in full would confirm on the leading "y" and spill
-        // "es, single permission" into the composer.
+        // "es, single permission" into the composer. The row text itself carries
+        // the branch, so a footer clipped off the read window still matches.
         if lower.contains("press enter to confirm") || lower.contains("yes, proceed") {
             return ["y", "p", "\u{1B}"]
         }
@@ -508,7 +509,52 @@ final class RelayConnection {
         if lower.contains("approve all pending") {
             return ["approve all pending", "configure individually", "exit (cancel subagents)"]
         }
-        return ["yes, single permission", "trust, always allow", "no (tab to edit)"]
+        if let digits = detectNumberedMenu(text, lower) {
+            return digits
+        }
+        // An unrecognized screen gets NO buttons. The fallback used to hand back
+        // the claude permission triple for every unknown blocked pane, which is
+        // what let the row's Allow button put a full option sentence on the wire
+        // to a codex menu — the leading "y" confirmed the dialog and the rest of
+        // the words piled into the composer ("es, single permission", five times
+        // in one afternoon). An honest [] leaves the custom-reply box only.
+        return []
+    }
+
+    /// Claude's numbered approval menu ("❯ 1. Yes … Esc to cancel") takes real
+    /// digit presses — the same shape the relay's NUMBERED_OPTION_RE harvests.
+    /// One contiguous run starting at 1; the window must carry the menu's own
+    /// footer so a numbered list in agent OUTPUT can't pass, and codex markers
+    /// ("(y)"/"(p)", a "press enter" footer) disqualify the screen outright.
+    /// Capped at 9 because a reply travels as bare bytes via replyPayload — a
+    /// second digit would ride the word-reply newline that a menu selection
+    /// must never carry.
+    private static func detectNumberedMenu(_ text: String, _ lower: String) -> [String]? {
+        guard lower.contains("esc to cancel"),
+              !lower.contains("press enter to confirm"),
+              !lower.contains("(y)"),
+              !lower.contains("(p)") else { return nil }
+        let row = try! NSRegularExpression(pattern: #"^\s*[❯>›»▶]?\s*(\d{1,2})[.)]\s+\S"#)
+        var expected = 1
+        for rawLine in text.split(separator: "\n") {
+            let line = String(rawLine)
+            if let match = row.firstMatch(
+                in: line, range: NSRange(line.startIndex..., in: line)
+            ), let numberRange = Range(match.range(at: 1), in: line),
+               let number = Int(line[numberRange]) {
+                if number == expected {
+                    expected += 1
+                    continue
+                }
+                break // run broken: output text, not a menu
+            }
+            // A wrapped label or its description line sits deeper than the rows
+            // and belongs to the run — but only once the run has started.
+            if expected > 1, line.prefix(while: { $0 == " " }).count >= 4 { continue }
+            if expected > 1 { break }
+        }
+        guard expected >= 3, expected <= 10 else { return nil }
+        return (1..<expected).map(String.init)
     }
 
     private func runHerdr(_ args: String...) -> String {

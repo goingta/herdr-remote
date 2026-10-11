@@ -478,12 +478,20 @@ private struct AgentSessionRow: View {
             if hovered || style == .blocked {
                 HStack(spacing: 4) {
                     if style == .blocked,
-                       agent.options?.contains("yes, single permission") == true {
+                       let allow = agent.options?.first(where: { $0.lowercased() == "yes, single permission" }) {
                         Button {
+                            // The option's own rawValue, never a hardcoded
+                            // sentence: this button sits on the same wire rules
+                            // as the grid below (replyPayload decides bare vs
+                            // submit-newline). The hardcoded "yes, single
+                            // permission" that used to live here survived the
+                            // shortcut-key fix and put 23 bytes on the wire to
+                            // every fallback-matched pane — the composer residue
+                            // reported on 2026-10-11.
                             relay.send(response: ResponseMessage(
                                 pane_id: agent.id,
                                 prompt_id: agent.promptId,
-                                text: "yes, single permission"
+                                text: allow
                             ))
                         } label: {
                             Image(systemName: "checkmark.circle.fill")

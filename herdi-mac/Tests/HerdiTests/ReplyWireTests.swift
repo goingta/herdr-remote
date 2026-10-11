@@ -77,10 +77,65 @@ final class ReplyWireTests: XCTestCase {
         )
     }
 
-    func testUnknownScreenFallsBackToPermissionTriple() {
-        XCTAssertEqual(
-            RelayConnection.detectOptions("some unrecognized prompt"),
-            ["yes, single permission", "trust, always allow", "no (tab to edit)"]
-        )
+    func testUnknownScreenGetsNoButtons() {
+        // The fallback used to hand back the claude permission triple for every
+        // unrecognized blocked pane. The row's Allow button then put a full
+        // option sentence on the wire to codex menus — the leading "y" confirmed
+        // the dialog and "es, single permission" piled into the composer.
+        XCTAssertEqual(RelayConnection.detectOptions("some unrecognized prompt"), [])
+    }
+
+    // MARK: detectOptions — claude numbered menus take digit presses
+
+    func testClaudeNumberedMenuMapsToDigitKeys() {
+        let screen = """
+        Do you want to proceed?
+        ❯ 1. Yes
+          2. Yes, and always allow access to /tmp from this project
+          3. No
+        Esc to cancel · Tab to amend
+        """
+        XCTAssertEqual(RelayConnection.detectOptions(screen), ["1", "2", "3"])
+    }
+
+    func testNumberedRunWithWrappedContinuationStillParses() {
+        // Claude wraps long labels and indents their description lines; both
+        // belong to the run.
+        let screen = """
+        › 1. 删 App Group 先装上（推荐）
+             把 entitlements 里的 App Group 删掉，立即可装
+          2. 你手动在 Xcode 注册
+        Esc to cancel
+        """
+        XCTAssertEqual(RelayConnection.detectOptions(screen), ["1", "2"])
+    }
+
+    func testNumberedListInAgentOutputIsNotAMenu() {
+        // Same rows, but the menu's own footer is missing: output text, and the
+        // honest answer is no buttons.
+        let screen = """
+        Steps:
+        1. run the tests
+        2. push the branch
+        """
+        XCTAssertEqual(RelayConnection.detectOptions(screen), [])
+    }
+
+    func testCodexMenuNeverYieldsDigits() {
+        // Codex rows carry (y)/(p) markers; even with the footer clipped off the
+        // read window the shortcut branch must win before numbered detection.
+        let screen = """
+        › 1. Yes, proceed (y)
+          2. Yes, and don't ask again (p)
+          3. No, and tell Codex what to do differently (esc)
+        """
+        XCTAssertEqual(RelayConnection.detectOptions(screen), ["y", "p", "\u{1B}"])
+    }
+
+    func testNumberedMenuBeyondNineOptionsGetsNoButtons() {
+        // A tenth-of-a-second digit would ride the word-reply newline a menu
+        // selection must never carry, so wide menus get no buttons at all.
+        let rows = (1...10).map { "\($0). option \($0)" }.joined(separator: "\n")
+        XCTAssertEqual(RelayConnection.detectOptions("pick one\n\(rows)\nEsc to cancel"), [])
     }
 }
