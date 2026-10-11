@@ -68,10 +68,15 @@ none of this repo's tests or `verify-*.sh` scripts reach it. Its log
 (`~/.local/state/herdr/plugins/devswha.herdr-web-ui/server.log`) records updates
 only — **no request-level lines**, so a "tapped Allow, nothing happened" report from
 the phone is not answerable from that log. To see what the phone's card would act
-on, replay the read side yourself: `curl http://127.0.0.1:7861/api/pane/prompt?pane_id=<id>`
-(auth required) returns the parsed prompt, or read the pane directly with
-`herdr pane read <id> --source visible` and answer it there to unblock the agent
-while diagnosing.
+on, replay both sides yourself, with the token from the server process's own
+environment (`tr '\0' '\n' < /proc/$(cat ~/.local/state/herdr/plugins/devswha.herdr-web-ui/server.pid)/environ | grep ^HERDR_WEB_TOKEN=`):
+the read side is `curl -H "Authorization: Bearer $T" http://127.0.0.1:7861/api/pane/prompt?pane_id=<urlencoded id>`
+(the parsed prompt — what the phone's card shows), the answer side is
+`curl -X POST -H "Authorization: Bearer $T" -H "Content-Type: application/json" -d '{"pane_id":"...","prompt_id":"<from the read>","option_index":0}' http://127.0.0.1:7861/api/pane/prompt/answer`.
+A live replay that answers `ok:true` while the phone "did nothing" puts the fault
+on the phone's card (its 409 `prompt_changed` surfaces as a 2-second flash of
+"the prompt changed — re-read", easy to miss on a stale card); a read-side answer
+also works: `herdr pane read <id> --source visible` and answer the pane directly.
 
 **Symptom before root cause: a "clicked X, nothing happened" report is about a
 client before it is about a bug.** This project has four reply paths with four
