@@ -926,6 +926,58 @@ class RelaySessionSwitchTests(unittest.TestCase):
             self.assertEqual(push.await_count, 1)
             self.assertIn("w1:p1", relay.last_blocked_prompts)
 
+    def test_event_path_skips_a_block_the_poll_saw_end(self):
+        # The screen read inside event_push awaits through the answer landing
+        # elsewhere (desk, Ghostty, another client). If the poll has already
+        # seen the pane working, the pre-answer screen this read came back with
+        # is producer-side stale: broadcasting it would resurrect a card the
+        # client just retracted. Only `working` disqualifies -- herdr's
+        # done/idle misreport genuinely blocked panes.
+        with loaded_relay() as relay:
+            event = {
+                "type": "agent_event",
+                "pane_id": "w1:p1",
+                "agent": "claude",
+                "status": "blocked",
+                "cwd": "/tmp/x",
+                "project": "x",
+                "host": "local",
+            }
+            relay.last_statuses["w1:p1"] = "working"
+            broadcast = mock.AsyncMock()
+
+            async def run_one_event():
+                with mock.patch.object(relay, "get_all_panes", return_value=([], [])), \
+                     mock.patch.object(relay, "read_pane", return_value="Deploy to prod?\nEnter to select · Esc to cancel"), \
+                     mock.patch.object(relay, "broadcast", new=broadcast):
+                    task = asyncio.create_task(relay.event_push())
+                    try:
+                        await relay.event_queue.put(dict(event))
+                        await asyncio.sleep(0.1)
+                    finally:
+                        task.cancel()
+                        with self.assertRaises(asyncio.CancelledError):
+                            await task
+
+            asyncio.run(run_one_event())
+
+            blocked_sends = [call for call in broadcast.await_args_list
+                             if call.args and getattr(call.args[0], "get", lambda _: None)("type") == "blocked"]
+            self.assertEqual(blocked_sends, [])
+            self.assertNotIn("w1:p1", relay.last_blocked_prompts)
+
+    def test_rebroadcast_blocked_skips_when_poll_saw_working(self):
+        # Same staleness for the toggle-refusal re-broadcast: the round trip
+        # awaited through the answer, the poll saw working, and the re-push
+        # would put the old card back.
+        with loaded_relay() as relay:
+            relay.last_statuses["w1:p1"] = "working"
+            with mock.patch.object(relay, "read_pane", return_value="Deploy to prod?\nEnter to select · Esc to cancel"), \
+                 mock.patch.object(relay, "broadcast", new=mock.AsyncMock()) as broadcast:
+                asyncio.run(relay.rebroadcast_blocked("w1:p1"))
+            broadcast.assert_not_called()
+            self.assertNotIn("w1:p1", relay.last_blocked_prompts)
+
     def test_reset_pane_state_drains_queued_events(self):
         # An event queued before a switch (never dequeued by event_push)
         # must not survive the switch to be processed afterward.

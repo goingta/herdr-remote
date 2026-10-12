@@ -2513,6 +2513,17 @@ async def rebroadcast_blocked(pane_id, remote=None):
     """
     cached = agent_cache.get(pane_id, {})
     content = await asyncio.to_thread(read_pane, pane_id, remote=remote)
+    # The read can outlive its own question: the answer landed while this round
+    # trip ran, and the poll has already seen the pane working. Pushing the
+    # pre-answer screen now would resurrect a card the client just retracted
+    # (TCP ordering is no help -- this is producer-side staleness: two
+    # coroutines, and the await above let the poll run first). `working` is the
+    # only disqualifier on purpose: herdr's `done`/`idle` are the vocabulary
+    # that misreports a genuinely blocked pane, so anything else still trusts
+    # the fresh read.
+    if last_statuses.get(pane_id) == "working":
+        last_blocked_prompts.pop(pane_id, None)
+        return
     message = blocked_message(
         pane_id,
         cached.get("agent", ""),
@@ -2758,6 +2769,14 @@ async def event_push():
                 if not blocker_on_screen(content):
                     last_blocked_prompts.pop(pane_id, None)
                     continue
+            # Same producer-side staleness rebroadcast_blocked guards: the screen
+            # read above awaited through the answer landing elsewhere, and the
+            # poll has already seen the pane working. Broadcast the pre-answer
+            # screen now and the client resurrects the card it just retracted.
+            # `working` only, per the done/idle misreport noted above.
+            if last_statuses.get(pane_id) == "working":
+                last_blocked_prompts.pop(pane_id, None)
+                continue
             message = blocked_message(
                 pane_id,
                 agent_data.get("agent", ""),

@@ -504,8 +504,13 @@ final class RelayConnection {
             DispatchQueue.main.async {
                 // The question ended while this read ran: drop the result —
                 // writing it back would resurrect a card the user already
-                // answered somewhere else.
-                guard agent.status == .blocked, agent.blockedGeneration == generation else { return }
+                // answered somewhere else. A pane closed mid-read is the same
+                // refusal: the closure still holds the old object (status and
+                // generation intact), so membership is the only test that
+                // catches it — and skips the "Agent Blocked" notification too.
+                guard agent.status == .blocked,
+                      agent.blockedGeneration == generation,
+                      self.agents.contains(where: { $0.id == agent.id }) else { return }
                 agent.prompt = String(content.prefix(500))
                 agent.options = options
                 self.sendNotification(agent: agent.name, project: agent.project)
