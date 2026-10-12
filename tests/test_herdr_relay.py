@@ -810,7 +810,7 @@ class RelaySessionSwitchTests(unittest.TestCase):
                     relay.reset_pane_state()          # simulates a switch landing
 
             with mock.patch.object(relay, "get_all_panes", return_value=(agents, [])), \
-                 mock.patch.object(relay, "read_pane", return_value="Deploy to prod?"), \
+                 mock.patch.object(relay, "read_pane", return_value="Deploy to prod?\nEnter to select · Esc to cancel"), \
                  mock.patch.object(relay, "broadcast", side_effect=switch_on_first_blocked_broadcast), \
                  mock.patch.object(relay, "send_web_push", new=mock.AsyncMock()):
                 asyncio.run(relay._poll_once())
@@ -869,7 +869,7 @@ class RelaySessionSwitchTests(unittest.TestCase):
                         switched.set()
 
                 with mock.patch.object(relay, "get_all_panes", return_value=([], [])), \
-                     mock.patch.object(relay, "read_pane", return_value="Deploy to prod?"), \
+                     mock.patch.object(relay, "read_pane", return_value="Deploy to prod?\nEnter to select · Esc to cancel"), \
                      mock.patch.object(relay, "broadcast", side_effect=switch_mid_broadcast):
                     task = asyncio.create_task(relay.event_push())
                     try:
@@ -905,7 +905,7 @@ class RelaySessionSwitchTests(unittest.TestCase):
 
             async def run_events(count):
                 with mock.patch.object(relay, "get_all_panes", return_value=([], [])), \
-                     mock.patch.object(relay, "read_pane", return_value="Deploy to prod?"), \
+                     mock.patch.object(relay, "read_pane", return_value="Deploy to prod?\nEnter to select · Esc to cancel"), \
                      mock.patch.object(relay, "broadcast", new=mock.AsyncMock()), \
                      mock.patch.object(relay, "send_web_push", new=push):
                     task = asyncio.create_task(relay.event_push())
@@ -2164,9 +2164,9 @@ class RelayPollBlockedDedupTests(unittest.IsolatedAsyncioTestCase):
         it, and the web push fires only once."""
         with loaded_relay() as relay:
             frames = iter([
-                "Rate limit exceeded\n  Build spinner |",
-                "Rate limit exceeded\n  Build spinner /",
-                "Rate limit exceeded\n  Build spinner -",
+                "Rate limit exceeded\n  Build spinner |\nEnter to select · Esc to cancel",
+                "Rate limit exceeded\n  Build spinner /\nEnter to select · Esc to cancel",
+                "Rate limit exceeded\n  Build spinner -\nEnter to select · Esc to cancel",
             ])
             broadcasts = []
 
@@ -2193,7 +2193,7 @@ class RelayPollBlockedDedupTests(unittest.IsolatedAsyncioTestCase):
             statuses = iter(["blocked", "working", "blocked"])
             # Only the blocked polls read the pane (a working pane is skipped),
             # so the two screens line up with poll1 and poll3.
-            screens = iter(["Approve this?", "Approve that?"])
+            screens = iter(["Approve this?\nEnter to select · Esc to cancel", "Approve that?\nEnter to select · Esc to cancel"])
 
             def snapshot():
                 return ([{**self.BLOCKED_AGENT, "status": next(statuses)}], [])
@@ -2234,7 +2234,7 @@ class RelayPollBlockedDedupTests(unittest.IsolatedAsyncioTestCase):
                 broadcasts.append(message)
 
             with mock.patch.object(relay, "get_all_panes", side_effect=snapshot), \
-                 mock.patch.object(relay, "read_pane", return_value="Approve this?"), \
+                 mock.patch.object(relay, "read_pane", return_value="Approve this?\nEnter to select · Esc to cancel"), \
                  mock.patch.object(relay, "send_web_push", new=mock.AsyncMock()) as web_push, \
                  mock.patch.object(relay, "broadcast", side_effect=capture):
                 await relay._poll_once()
@@ -2246,6 +2246,53 @@ class RelayPollBlockedDedupTests(unittest.IsolatedAsyncioTestCase):
         # card), but the second broadcast is an update: no second notification.
         self.assertEqual(len(blocked), 2)
         self.assertEqual([m["update"] for m in blocked], [False, True])
+        self.assertEqual(web_push.await_count, 1)
+
+    async def test_a_block_whose_dialog_has_left_the_screen_is_decayed(self):
+        """herdr's codex status outlives its approval box: the box times out, the pane
+        returns to its composer, and the status lingers. Broadcasting from it is what kept
+        button-less cards parked at the top of the phone's Needs-you list. The broadcast
+        branch reads the screen and decays the block when no dialog is on it."""
+        with loaded_relay() as relay:
+            agent = {"pane_id": "w1:p1", "agent": "codex", "status": "blocked",
+                     "cwd": "/w", "project": "proj", "host": "local", "remote": None}
+            broadcasts = []
+
+            async def capture(message):
+                broadcasts.append(message)
+
+            with mock.patch.object(relay, "get_all_panes", return_value=([dict(agent)], [])), \
+                 mock.patch.object(relay, "read_pane", return_value=BlockerOnScreenTests.CODEX_COMPOSER), \
+                 mock.patch.object(relay, "send_web_push", new=mock.AsyncMock()) as web_push, \
+                 mock.patch.object(relay, "broadcast", side_effect=capture):
+                await relay._poll_once()
+                await relay._poll_once()
+
+        self.assertEqual([m for m in broadcasts if m.get("type") == "blocked"], [])
+        web_push.assert_not_awaited()
+        # The streak is forgotten, so a box that really comes back notifies fresh.
+        self.assertNotIn("w1:p1", relay.last_blocked_prompts)
+
+    async def test_a_block_with_the_dialog_still_on_screen_broadcasts(self):
+        """The decay test is not a second guesser: a real approval box on screen
+        broadcasts and notifies exactly as before."""
+        with loaded_relay() as relay:
+            agent = {"pane_id": "w1:p1", "agent": "codex", "status": "blocked",
+                     "cwd": "/w", "project": "proj", "host": "local", "remote": None}
+            broadcasts = []
+
+            async def capture(message):
+                broadcasts.append(message)
+
+            with mock.patch.object(relay, "get_all_panes", return_value=([dict(agent)], [])), \
+                 mock.patch.object(relay, "read_pane", return_value=BlockerOnScreenTests.CODEX_APPROVAL), \
+                 mock.patch.object(relay, "send_web_push", new=mock.AsyncMock()) as web_push, \
+                 mock.patch.object(relay, "broadcast", side_effect=capture):
+                await relay._poll_once()
+
+        blocked = [m for m in broadcasts if m.get("type") == "blocked"]
+        self.assertEqual(len(blocked), 1)
+        self.assertTrue(blocked[0]["options"])
         self.assertEqual(web_push.await_count, 1)
 
 
@@ -4251,6 +4298,104 @@ class QuestionProbeTests(unittest.TestCase):
             with mock.patch.object(relay, "read_pane", side_effect=[self.CHECKBOX, "idle output"]):
                 found = relay.probe_idle_questions(panes)
             self.assertEqual(list(found), [("local", "w8:p1")])
+
+
+class BlockerOnScreenTests(unittest.TestCase):
+    """A `blocked` status with no live dialog behind it is a phantom.
+
+    codex's approval box times itself out and the pane returns to its composer while herdr's
+    status lingers on `blocked` -- measured in production, five codex panes drew button-less
+    blocked cards that sat at the top of the phone's Needs-you list for as long as the pane
+    stayed parked. `blocker_on_screen` is the decay test the broadcast branch runs before it
+    believes the status: a dialog (or its option labels) has to actually be on screen.
+    """
+
+    # Captured off a live codex pane (wY:p6) after its approval box had timed out: the composer
+    # and the standing "Ask for approval" policy line, with no dialog anywhere.
+    CODEX_COMPOSER = (
+        "  目前尚未验证实际设备上的最长可用时长。\n"
+        "  └ Tip: Paste an image with Ctrl+V to attach it to your next message.\n"
+        "\n"
+        "  Worked for 27s • 3:29 PM\n"
+        "\n"
+        "\n"
+        "› Ask Codex to do anything\n"
+        "\n"
+        "  GPT-6-Astra high · herdrm · Ask for approval · Context 32% used · 104K used · 0.162.1 · 实现语音转写后返回文字输入 · Main [default]\n"
+        "  ← for agents · ? for shortcuts                                                                                    ⚠ 3 warnings · f2 to view"
+    )
+
+    # The same harness with its approval box up: option labels herdr's own live_strong_blocker
+    # keys on, plus the dialog footer.
+    CODEX_APPROVAL = (
+        "Allow command?\n"
+        "  ❯ 1. Yes, single permission\n"
+        "    2. Trust, always allow\n"
+        "    3. No (tab to edit)\n"
+        "  Enter to select · Esc to cancel"
+    )
+
+    # Agent prose that merely talks about approvals -- the text herdr's weak_blocker
+    # (whole-screen `do you want to` / `[y/n]` matching) trips over. No dialog on screen.
+    CODE_TALKING_ABOUT_APPROVALS = (
+        "The fix routes SAFE_RESPONSES through detect_approval_options; a prompt asking\n"
+        "'do you want to continue? [y/n]' in the docs is just documentation.\n"
+        "› Ask Codex to do anything"
+    )
+
+    def test_a_codex_composer_screen_is_not_a_blocker(self):
+        with loaded_relay() as relay:
+            self.assertFalse(relay.blocker_on_screen(self.CODEX_COMPOSER))
+
+    def test_a_codex_approval_box_on_screen_is_a_blocker(self):
+        with loaded_relay() as relay:
+            self.assertTrue(relay.blocker_on_screen(self.CODEX_APPROVAL))
+
+    def test_prose_about_approvals_is_not_a_blocker(self):
+        with loaded_relay() as relay:
+            self.assertFalse(relay.blocker_on_screen(self.CODE_TALKING_ABOUT_APPROVALS))
+
+    def test_a_claude_menu_is_still_a_blocker(self):
+        with loaded_relay() as relay:
+            self.assertTrue(relay.blocker_on_screen(QuestionProbeTests.CHECKBOX))
+
+    def test_an_event_whose_dialog_has_left_the_screen_is_decayed(self):
+        """The event path draws from the same lingering status, so it decays the same way."""
+        with loaded_relay() as relay:
+            event = {
+                "type": "agent_event",
+                "pane_id": "w1:p1",
+                "agent": "codex",
+                "status": "blocked",
+                "cwd": "/tmp/x",
+                "project": "x",
+                "host": "local",
+            }
+            broadcasts = []
+
+            async def capture(message):
+                broadcasts.append(message)
+
+            async def run_one_event():
+                with mock.patch.object(relay, "get_all_panes", return_value=([], [])), \
+                     mock.patch.object(relay, "read_pane", return_value=self.CODEX_COMPOSER), \
+                     mock.patch.object(relay, "broadcast", side_effect=capture), \
+                     mock.patch.object(relay, "send_web_push", new=mock.AsyncMock()) as web_push:
+                    task = asyncio.create_task(relay.event_push())
+                    try:
+                        await relay.event_queue.put(dict(event))
+                        await asyncio.sleep(0.1)
+                    finally:
+                        task.cancel()
+                        with self.assertRaises(asyncio.CancelledError):
+                            await task
+                return web_push
+
+            web_push = asyncio.run(run_one_event())
+
+            self.assertEqual([m for m in broadcasts if m.get("type") == "blocked"], [])
+            web_push.assert_not_awaited()
+            self.assertNotIn("w1:p1", relay.last_blocked_prompts)
 
 
 

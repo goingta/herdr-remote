@@ -1913,6 +1913,26 @@ def checkbox_field_focused(text):
 QUESTION_FOOTER_TAIL_LINES = 4
 
 
+def blocker_on_screen(text):
+    """True when a live approval/question dialog (or its option labels) is on screen.
+
+    The decay test for a `blocked` status. herdr's codex detection keys on whole-screen text
+    (`do you want to`, `[y/n]`, even prose), and its approval box times itself out while the
+    status lingers -- so `pane list` keeps saying blocked over a screen that is back to its
+    composer. Broadcast from that status and the phone draws a button-less card that parks
+    itself at the top of Needs-you for as long as the pane stays parked. Read wide on purpose:
+    a false keep costs a card the reader taps into and dismisses; a false decay costs a real
+    approval the reader was never told about.
+    """
+    if question_footer_at_bottom(text):
+        return True
+    return bool(
+        detect_approval_options(text)
+        or detect_checkbox_options(text)
+        or detect_numbered_options(text)
+    )
+
+
 def question_footer_at_bottom(text):
     """True when the dialog's footer is the last thing on the screen.
 
@@ -2588,6 +2608,16 @@ async def _poll_once():
                 content = probed.get((a.get("host", "local"), pid))
                 if content is None:
                     content = await asyncio.to_thread(read_pane, pid, remote=a.get("remote"))
+                if content is None or not blocker_on_screen(content):
+                    # herdr's status outlives the dialog: codex's approval box times itself
+                    # out and the pane returns to its composer while the status lingers.
+                    # Broadcasting from it drew a button-less card that parked itself at the
+                    # top of the phone's Needs-you list. Decay instead: no broadcast, the
+                    # streak ends, and the next snapshot carries whatever the screen really
+                    # shows. A box that genuinely comes back re-enters as a new block.
+                    last_blocked_prompts.pop(pid, None)
+                    last_statuses[pid] = status
+                    continue
                 message = blocked_message(
                     pid,
                     a["agent"],
@@ -2698,12 +2728,19 @@ async def event_push():
                 content = await asyncio.to_thread(read_pane, pane_id, remote=remote)
             else:
                 content = event.get("prompt", "Agent is blocked")
+            content = content or agent_data.get("prompt", "Agent is blocked")
+            if remote or host == "local":
+                # Same decay test as the poll: the status can outlive the dialog it came
+                # from, and an event drawn from it is just as phantom.
+                if not blocker_on_screen(content):
+                    last_blocked_prompts.pop(pane_id, None)
+                    continue
             message = blocked_message(
                 pane_id,
                 agent_data.get("agent", ""),
                 agent_data.get("project", ""),
                 host,
-                content or agent_data.get("prompt", "Agent is blocked"),
+                content,
             )
             # Unreachable with a mismatch today: whichever branch got here
             # did so with no await since the last gen check (the "agents"
