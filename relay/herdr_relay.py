@@ -1922,15 +1922,44 @@ def blocker_on_screen(text):
     composer. Broadcast from that status and the phone draws a button-less card that parks
     itself at the top of Needs-you for as long as the pane stays parked. Read wide on purpose:
     a false keep costs a card the reader taps into and dismisses; a false decay costs a real
-    approval the reader was never told about.
+    approval the reader was never told about. The strong footer strings are herdr's own
+    live_strong_blocker keys, so a box herdr considered strong never decays here.
     """
     if question_footer_at_bottom(text):
+        return True
+    tail = " ".join(" ".join(text.splitlines()[-QUESTION_FOOTER_TAIL_LINES:]).split()).lower()
+    if any(
+        s in tail
+        for s in ("allow command?", "press enter to confirm", "enter to submit")
+    ):
         return True
     return bool(
         detect_approval_options(text)
         or detect_checkbox_options(text)
         or detect_numbered_options(text)
     )
+
+
+def blocked_update_flag(message, pane_id):
+    """Notification-grade update flag for a blocked message, with the announce bookkeeping.
+
+    update=True suppresses the downstream notifiers (the iOS local notification keys on it,
+    the web push is skipped on it) while the message still broadcasts, so clients refresh
+    their card. The streak test alone re-alerted a prompt the reader had already been shown
+    whenever herdr's status flickered for one round and the streak restarted -- measured in
+    production, 8 notifications in 57 seconds for one pane -- so the announce memory decides
+    it too: a prompt_id that has already drawn a notification stays an update even across a
+    streak break, while a new prompt_id inside a live streak still reads as that streak's
+    own update. Shared by the poll and event paths, which must agree or one of them
+    re-fires what the other just silenced.
+    """
+    update = (
+        announced_prompts.get(pane_id) == message["prompt_id"]
+        or last_blocked_prompts.get(pane_id) is not None
+    )
+    if not update:
+        announced_prompts[pane_id] = message["prompt_id"]
+    return update
 
 
 def question_footer_at_bottom(text):
@@ -2593,6 +2622,20 @@ async def _poll_once():
         for a in agents:
             if (a.get("host", "local"), a["pane_id"]) in probed:
                 a["status"] = "blocked"
+        # herdr's blocked status can outlive the dialog behind it -- codex's approval box
+        # times itself out and the pane returns to its composer while the status lingers.
+        # Screens are read and checked BEFORE the snapshot goes out so the phone's list
+        # follows the screen rather than the status: the mirror of the probe above, which
+        # promotes on screen evidence; this demotes on it. The reads land in block_screens
+        # so the broadcast branch below never reads a pane twice.
+        block_screens = {}
+        for a in agents:
+            pid = a["pane_id"]
+            if a["status"] == "blocked" and (a.get("host", "local"), pid) not in probed:
+                content = await asyncio.to_thread(read_pane, pid, remote=a.get("remote"))
+                block_screens[pid] = content
+                if content is None or not blocker_on_screen(content):
+                    a["status"] = "idle"
         update_pane_maps(agents, shells)
         # Always broadcast (even empty list) so clients stay in sync
         spaces = await asyncio.to_thread(refresh_spaces)
@@ -2603,21 +2646,11 @@ async def _poll_once():
         for a in agents:
             pid, status = a["pane_id"], a["status"]
             if status == "blocked":
-                # The probe has already read a promoted pane; reading it again here would double
-                # the cost of the one case this exists for.
                 content = probed.get((a.get("host", "local"), pid))
                 if content is None:
+                    content = block_screens.get(pid)
+                if content is None:
                     content = await asyncio.to_thread(read_pane, pid, remote=a.get("remote"))
-                if content is None or not blocker_on_screen(content):
-                    # herdr's status outlives the dialog: codex's approval box times itself
-                    # out and the pane returns to its composer while the status lingers.
-                    # Broadcasting from it drew a button-less card that parked itself at the
-                    # top of the phone's Needs-you list. Decay instead: no broadcast, the
-                    # streak ends, and the next snapshot carries whatever the screen really
-                    # shows. A box that genuinely comes back re-enters as a new block.
-                    last_blocked_prompts.pop(pid, None)
-                    last_statuses[pid] = status
-                    continue
                 message = blocked_message(
                     pid,
                     a["agent"],
@@ -2633,25 +2666,11 @@ async def _poll_once():
                 previous = last_blocked_prompts.get(pid)
                 if previous != fingerprint:
                     # A blocked pane whose TUI animates (spinners, elapsed timers) repaints
-                    # its captured content every poll, so question_prompt_id -- and this
-                    # fingerprint -- churn even though the pane is sitting on one prompt. The
-                    # old `previous[0] == prompt_id` test then read every churn as a brand-new
-                    # prompt (update=False) and re-fired the notification. Any re-broadcast for
-                    # a pane still in the same blocked streak is an update: `previous` is
-                    # cleared the moment the pane leaves `blocked` (see the else branch), so
-                    # `previous is not None` means "already announced this block". The streak
-                    # test alone re-alerted a prompt the reader had already been shown whenever
-                    # herdr's status flickered for one round and the streak restarted, so the
-                    # announce memory decides it too: a prompt_id that has already drawn a
-                    # notification stays an update even across a streak break, while a new
-                    # prompt_id inside a live streak still reads as the streak's own update.
-                    message["update"] = (
-                        announced_prompts.get(pid) == message["prompt_id"]
-                        or previous is not None
-                    )
+                    # its captured content every poll, so this fingerprint churns even
+                    # though the pane is sitting on one prompt. The gate keeps every
+                    # churn from broadcasting; the update flag decides who gets told.
+                    message["update"] = blocked_update_flag(message, pid)
                     last_blocked_prompts[pid] = fingerprint
-                    if not message["update"]:
-                        announced_prompts[pid] = message["prompt_id"]
                     log.info("Blocked (poll) pane=%s update=%s", pid, message["update"])
                     await broadcast(message)
                     # Clients still need every re-broadcast (the prompt_id they must echo back
@@ -2730,8 +2749,12 @@ async def event_push():
                 content = event.get("prompt", "Agent is blocked")
             content = content or agent_data.get("prompt", "Agent is blocked")
             if remote or host == "local":
-                # Same decay test as the poll: the status can outlive the dialog it came
-                # from, and an event drawn from it is just as phantom.
+                # Same decay test as the poll's pre-snapshot pass: the status can outlive
+                # the dialog it came from, and an event drawn from it is just as phantom.
+                # This path has no agents snapshot of its own to correct (the one it
+                # broadcast above merges herdr's view), so decaying here ends the streak
+                # and silences the notification; the poll's next snapshot carries the
+                # screen's real status to clients.
                 if not blocker_on_screen(content):
                     last_blocked_prompts.pop(pane_id, None)
                     continue
@@ -2758,18 +2781,12 @@ async def event_push():
             # since the plugin's event beats the poll whenever it fires at all, the
             # notification was lost exactly when the fast path worked. Push here, on the same
             # one-shot rule the poll uses: announce a new block, stay quiet for a re-broadcast.
-            previous = last_blocked_prompts.get(pane_id)
-            message["update"] = (
-                announced_prompts.get(pane_id) == message["prompt_id"]
-                or previous is not None
-            )
+            message["update"] = blocked_update_flag(message, pane_id)
             last_blocked_prompts[pane_id] = (
                 message["prompt_id"],
                 tuple(message["selected_options"]),
                 message["prompt"],
             )
-            if not message["update"]:
-                announced_prompts[pane_id] = message["prompt_id"]
             log.info("Blocked (event) pane=%s update=%s", pane_id, message["update"])
             await broadcast(message)
             if not message["update"]:

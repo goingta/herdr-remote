@@ -2250,9 +2250,9 @@ class RelayPollBlockedDedupTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_block_whose_dialog_has_left_the_screen_is_decayed(self):
         """herdr's codex status outlives its approval box: the box times out, the pane
-        returns to its composer, and the status lingers. Broadcasting from it is what kept
-        button-less cards parked at the top of the phone's Needs-you list. The broadcast
-        branch reads the screen and decays the block when no dialog is on it."""
+        returns to its composer, and the status lingers. The snapshot itself carries the
+        screen's status -- the card leaves the phone's Needs-you list entirely -- and the
+        broadcast branch stays silent."""
         with loaded_relay() as relay:
             agent = {"pane_id": "w1:p1", "agent": "codex", "status": "blocked",
                      "cwd": "/w", "project": "proj", "host": "local", "remote": None}
@@ -2268,6 +2268,8 @@ class RelayPollBlockedDedupTests(unittest.IsolatedAsyncioTestCase):
                 await relay._poll_once()
                 await relay._poll_once()
 
+            snapshots = [m for m in broadcasts if m.get("type") == "agents"]
+            self.assertEqual(snapshots[0]["agents"][0]["status"], "idle")
         self.assertEqual([m for m in broadcasts if m.get("type") == "blocked"], [])
         web_push.assert_not_awaited()
         # The streak is forgotten, so a box that really comes back notifies fresh.
@@ -4358,6 +4360,17 @@ class BlockerOnScreenTests(unittest.TestCase):
     def test_a_claude_menu_is_still_a_blocker(self):
         with loaded_relay() as relay:
             self.assertTrue(relay.blocker_on_screen(QuestionProbeTests.CHECKBOX))
+
+    def test_herdr_strong_footer_signs_are_blockers_without_esc_to_cancel(self):
+        """The keys herdr's own live_strong_blocker matches on never decay, even where the
+        question-footer test does not reach: a false decay costs a real approval."""
+        with loaded_relay() as relay:
+            for tail in (
+                "Allow command?",
+                "Press enter to confirm or esc to cancel",
+                "  enter to submit answer",
+            ):
+                self.assertTrue(relay.blocker_on_screen(f"some prompt\n{tail}"), tail)
 
     def test_an_event_whose_dialog_has_left_the_screen_is_decayed(self):
         """The event path draws from the same lingering status, so it decays the same way."""
