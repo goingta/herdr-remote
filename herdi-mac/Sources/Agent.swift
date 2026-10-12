@@ -31,6 +31,28 @@ final class Agent: Identifiable {
         self.cwd = cwd
         self.host = host
     }
+
+    /// The question ended somewhere else — answered at the desk, in Ghostty, or
+    /// from another client. Drop every field the approval card renders: a card
+    /// left holding stale options puts option text on the wire into a composer
+    /// that no longer shows a menu (the composer-residue bug of 2026-10-11).
+    func clearPrompt() {
+        prompt = nil
+        options = nil
+        promptId = nil
+        multiOptions = []
+        selectedOptions = []
+        interaction = nil
+        isMultiSelect = false
+    }
+
+    /// The next agent whose approval card should stand in place of one just
+    /// retracted: the first still-blocked agent other than `afterId`, in poll
+    /// order. Nil when the queue is empty — the panel collapses. Pure so the
+    /// switch-to-next policy is testable without AppKit.
+    static func nextBlockedAgent(afterId: String, agents: [Agent]) -> Agent? {
+        agents.first { $0.status == .blocked && $0.id != afterId }
+    }
 }
 
 struct AgentMessage: Decodable {

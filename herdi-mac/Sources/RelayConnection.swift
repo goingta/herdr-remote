@@ -172,6 +172,12 @@ final class RelayConnection {
                             if a.status == .blocked && existing.status != .blocked {
                                 readPaneForBlocked(existing, remote: a.host == "local" ? nil : a.host)
                             }
+                            // The question was answered elsewhere (desk, Ghostty,
+                            // another client): the card's options are stale the
+                            // moment the status leaves blocked.
+                            if existing.status == .blocked && a.status != .blocked {
+                                existing.clearPrompt()
+                            }
                             existing.status = a.status
                         }
                         if existing.project != a.project { existing.project = a.project }
@@ -738,8 +744,12 @@ final class RelayConnection {
 
     private func upsertAgent(_ data: AgentMessage.AgentData) {
         if let existing = agents.first(where: { $0.id == data.pane_id }) {
+            let newStatus = AgentStatus(rawValue: data.status) ?? .unknown
+            if existing.status == .blocked && newStatus != .blocked {
+                existing.clearPrompt()
+            }
             existing.name = data.agent
-            existing.status = AgentStatus(rawValue: data.status) ?? .unknown
+            existing.status = newStatus
             existing.project = data.project
             existing.cwd = data.cwd
             existing.host = data.host ?? "local"

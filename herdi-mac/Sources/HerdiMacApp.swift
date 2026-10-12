@@ -311,6 +311,21 @@ class HerdiAppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
 
+                // Retract a card whose question ended elsewhere. Approving in
+                // Ghostty flips the pane's status on the next poll (≤2s local,
+                // ≤5s remote); the card must follow reality, not wait for a
+                // click — and a card for a vanished pane must go too (the nil
+                // lookup lands in the same branch: nil != .blocked). The panel
+                // popped because an agent needed input, so a still-blocked
+                // successor takes the card's place; an empty queue collapses.
+                if case .approval(let agentId) = self.panelController?.surface,
+                   self.relay.agents.first(where: { $0.id == agentId })?.status != .blocked {
+                    let next = Agent.nextBlockedAgent(afterId: agentId, agents: self.relay.agents)
+                    withAnimation(NotchAnimation.close) {
+                        self.panelController?.surface = next.map { .approval(agentId: $0.id) } ?? .collapsed
+                    }
+                }
+
                 // Rebuild menu every 5s for fresh status
                 self.rebuildMenu()
             }
