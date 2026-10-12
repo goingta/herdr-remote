@@ -2647,6 +2647,13 @@ async def _poll_once():
                 block_screens[pid] = content
                 if content is None or not blocker_on_screen(content):
                     a["status"] = "idle"
+        # The reads above await, and a session switch can land in one of them:
+        # everything below writes state for the old session -- pane maps, the
+        # guards' last_statuses, the snapshot itself. Bail before the FIRST
+        # write; the post-snapshot check alone left the early status commit a
+        # window to repopulate what reset_pane_state cleared.
+        if gen != POLL_GENERATION:
+            return
         update_pane_maps(agents, shells)
         # Commit this round's statuses BEFORE the snapshot goes out, and do it
         # synchronously: the guards in event_push / rebroadcast_blocked read

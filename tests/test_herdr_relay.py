@@ -1041,6 +1041,38 @@ class RelaySessionSwitchTests(unittest.TestCase):
 
             self.assertNotIn("w1:p1", relay.last_blocked_prompts)
 
+    def test_stale_poll_bails_before_writing_state(self):
+        # The reads in the demotion pass await, so a session switch can land in
+        # one. The round must bail before its FIRST state write: the early
+        # status commit (which the stale-read guards depend on) would otherwise
+        # repopulate what reset_pane_state just cleared, and the new session's
+        # real blocked push would be refused on the old session's status.
+        with loaded_relay() as relay:
+            agents = [{"pane_id": "w1:p1", "agent": "claude", "status": "working",
+                       "cwd": "/tmp/x", "project": "x", "host": "local",
+                       "remote": None, "label": "", "workspace_label": "",
+                       "workspace_id": "w1", "tab_id": "w1:t1"}]
+            panes_gate = threading.Event()
+
+            def gated_panes():
+                panes_gate.wait(timeout=5)
+                return (agents, [])
+
+            async def run_switched():
+                poll = asyncio.create_task(relay._poll_once())
+                await asyncio.sleep(0.05)      # the poll parks on gated_panes
+                relay.reset_pane_state()       # the switch lands mid-read
+                panes_gate.set()
+                await asyncio.wait_for(poll, timeout=2)
+
+            with mock.patch.object(relay, "get_all_panes", new=gated_panes), \
+                 mock.patch.object(relay, "refresh_spaces", return_value={}), \
+                 mock.patch.object(relay, "broadcast", new=mock.AsyncMock()):
+                asyncio.run(run_switched())
+
+            # The stale round wrote nothing: the new session starts clean.
+            self.assertEqual(relay.last_statuses, {})
+
     def test_reset_pane_state_drains_queued_events(self):
         # An event queued before a switch (never dequeued by event_push)
         # must not survive the switch to be processed afterward.
