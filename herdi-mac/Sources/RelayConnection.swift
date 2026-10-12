@@ -170,6 +170,7 @@ final class RelayConnection {
                     if let existing = agents.first(where: { $0.id == a.id }) {
                         if existing.status != a.status {
                             if a.status == .blocked && existing.status != .blocked {
+                                existing.blockedGeneration += 1
                                 readPaneForBlocked(existing, remote: a.host == "local" ? nil : a.host)
                             }
                             // The question was answered elsewhere (desk, Ghostty,
@@ -470,6 +471,10 @@ final class RelayConnection {
         let paneId = agent.id.contains(":") && remote != nil
             ? String(agent.id.drop(while: { $0 != ":" }).dropFirst())
             : agent.id
+        // The read can outlive its own blocked episode (answered in Ghostty
+        // while the SSH round trip runs): publish only into the episode that
+        // ordered the read.
+        let generation = agent.blockedGeneration
 
         DispatchQueue.global(qos: .utility).async { [self] in
             // `visible`, not `recent`, as the relay does (PROMPT_READ_SOURCE). `recent` past the
@@ -497,6 +502,10 @@ final class RelayConnection {
             let options = Self.detectOptions(content)
 
             DispatchQueue.main.async {
+                // The question ended while this read ran: drop the result —
+                // writing it back would resurrect a card the user already
+                // answered somewhere else.
+                guard agent.status == .blocked, agent.blockedGeneration == generation else { return }
                 agent.prompt = String(content.prefix(500))
                 agent.options = options
                 self.sendNotification(agent: agent.name, project: agent.project)

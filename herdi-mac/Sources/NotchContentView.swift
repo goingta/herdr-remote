@@ -114,6 +114,11 @@ struct NotchPanelView: View {
                         controller.surface = .collapsed
                     }
                 }
+                // Identity per agent: the watcher switches one card for the
+                // next blocked agent in place, and a SwiftUI view kept alive
+                // across that switch carries its @State — A's half-typed
+                // custom reply would land on B's composer.
+                .id(agent.id)
                 .transition(.blurFade.combined(with: .scale(scale: 0.96, anchor: .top)))
             }
         case .sessionList:
@@ -675,9 +680,10 @@ private struct ApprovalCard: View {
     private func respond(_ text: String) {
         relay.send(response: ResponseMessage(pane_id: agent.id, prompt_id: agent.promptId, text: text))
         agent.status = .working
-        agent.prompt = nil
-        agent.promptId = nil
-        agent.options = nil
+        // One chokepoint for the card's fields: partial clears here left multi
+        // state behind, and a re-blocked pane would render the previous
+        // question's menu.
+        agent.clearPrompt()
         onDismiss()
     }
 
@@ -693,10 +699,7 @@ private struct ApprovalCard: View {
     private func submit(promptId: String) {
         relay.submitQuestion(paneId: agent.id, promptId: promptId)
         agent.status = .working
-        agent.prompt = nil
-        agent.promptId = nil
-        agent.multiOptions = []
-        agent.selectedOptions = []
+        agent.clearPrompt()
         onDismiss()
     }
 }

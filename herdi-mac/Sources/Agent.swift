@@ -22,6 +22,12 @@ final class Agent: Identifiable {
     var selectedOptions: [String] = []
     var interaction: String?
     var isMultiSelect = false
+    /// Monotonic marker for the current blocked episode. Bumped on entering
+    /// blocked and when the question ends; a background screen read captures
+    /// the value at start and may only publish what it read while the episode
+    /// is unchanged — a read that lands after the answer must not resurrect
+    /// the card it was for.
+    var blockedGeneration = 0
 
     init(id: String, name: String, status: AgentStatus, project: String, cwd: String, host: String = "local") {
         self.id = id
@@ -44,6 +50,7 @@ final class Agent: Identifiable {
         selectedOptions = []
         interaction = nil
         isMultiSelect = false
+        blockedGeneration += 1
     }
 
     /// The next agent whose approval card should stand in place of one just

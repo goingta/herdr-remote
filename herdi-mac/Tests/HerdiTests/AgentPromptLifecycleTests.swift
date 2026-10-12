@@ -23,6 +23,7 @@ final class AgentPromptLifecycleTests: XCTestCase {
         a.selectedOptions = ["Push"]
         a.interaction = "multi_question"
         a.isMultiSelect = true
+        let before = a.blockedGeneration
 
         a.clearPrompt()
 
@@ -33,6 +34,9 @@ final class AgentPromptLifecycleTests: XCTestCase {
         XCTAssertEqual(a.selectedOptions, [])
         XCTAssertNil(a.interaction)
         XCTAssertFalse(a.isMultiSelect)
+        // The episode is over: a background screen read that captured the old
+        // generation must refuse to publish into the new one.
+        XCTAssertEqual(a.blockedGeneration, before + 1)
     }
 
     // MARK: nextBlockedAgent — the switch-to-next queue policy
