@@ -506,11 +506,13 @@ final class RelayConnection {
                 // writing it back would resurrect a card the user already
                 // answered somewhere else. A pane closed mid-read is the same
                 // refusal: the closure still holds the old object (status and
-                // generation intact), so membership is the only test that
-                // catches it — and skips the "Agent Blocked" notification too.
+                // generation intact), so OBJECT identity is the only test that
+                // catches it — an id check would pass for a same-id replacement
+                // Agent recreated after a failed poll, and the stale write would
+                // land in the live list again.
                 guard agent.status == .blocked,
                       agent.blockedGeneration == generation,
-                      self.agents.contains(where: { $0.id == agent.id }) else { return }
+                      self.agents.contains(where: { $0 === agent }) else { return }
                 agent.prompt = String(content.prefix(500))
                 agent.options = options
                 self.sendNotification(agent: agent.name, project: agent.project)

@@ -2648,6 +2648,15 @@ async def _poll_once():
                 if content is None or not blocker_on_screen(content):
                     a["status"] = "idle"
         update_pane_maps(agents, shells)
+        # Commit this round's statuses BEFORE the snapshot goes out, and do it
+        # synchronously: the guards in event_push / rebroadcast_blocked read
+        # this dict, and a loop-end write left a window -- between the working
+        # snapshot and the write, blocked pushes for other panes await web
+        # pushes and reads, and a stale screen read completing in one of those
+        # gaps passed the guard on the pre-answer status. Nothing else reads
+        # last_statuses mid-loop, so the early commit changes nothing else.
+        for a in agents:
+            last_statuses[a["pane_id"]] = a["status"]
         # Always broadcast (even empty list) so clients stay in sync
         spaces = await asyncio.to_thread(refresh_spaces)
         await broadcast(
@@ -2710,7 +2719,8 @@ async def _poll_once():
                 # the next block replaces it in place, and tapping it closes it. That is a far
                 # smaller cost than losing the channel.
                 last_blocked_prompts.pop(pid, None)
-            last_statuses[pid] = status
+            # Statuses were committed before the snapshot above; a loop-end
+            # write here is what left the guard window open.
 async def event_push():
     while True:
         event = await event_queue.get()

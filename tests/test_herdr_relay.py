@@ -978,6 +978,69 @@ class RelaySessionSwitchTests(unittest.TestCase):
             broadcast.assert_not_called()
             self.assertNotIn("w1:p1", relay.last_blocked_prompts)
 
+    def test_poll_commits_statuses_before_the_snapshot(self):
+        # The stale-read guards check last_statuses; the commit must land
+        # before the snapshot broadcast, or the awaits between snapshot and a
+        # loop-end write leave the guard reading the pre-answer status.
+        with loaded_relay() as relay:
+            agents = [{"pane_id": "w1:p1", "agent": "claude", "status": "working",
+                       "cwd": "/tmp/x", "project": "x", "host": "local",
+                       "remote": None, "label": "", "workspace_label": "",
+                       "workspace_id": "w1", "tab_id": "w1:t1"}]
+            captured = {}
+
+            async def snap_broadcast(message):
+                captured.setdefault("at_snapshot", dict(relay.last_statuses))
+
+            with mock.patch.object(relay, "get_all_panes", return_value=(agents, [])), \
+                 mock.patch.object(relay, "refresh_spaces", return_value={}), \
+                 mock.patch.object(relay, "broadcast", new=snap_broadcast):
+                asyncio.run(relay._poll_once())
+
+            self.assertEqual(captured["at_snapshot"].get("w1:p1"), "working")
+
+    def test_stale_event_read_cannot_pass_guard_after_working_snapshot(self):
+        # The interleaving that broke the first guard, reproduced with real
+        # coroutines: the event's screen read is still in flight when the poll
+        # broadcasts A=working; when the read finally returns the pre-answer
+        # screen, the guard must see the committed working status and refuse.
+        with loaded_relay() as relay:
+            event = {
+                "type": "agent_event",
+                "pane_id": "w1:p1",
+                "agent": "claude",
+                "status": "blocked",
+                "cwd": "/tmp/x",
+                "project": "x",
+                "host": "local",
+            }
+            read_gate = threading.Event()
+
+            def gated_read(*args, **kwargs):
+                # to_thread runs this in a worker thread: block it on a
+                # threading gate, not an asyncio one.
+                read_gate.wait(timeout=5)
+                return "Deploy to prod?\nEnter to select · Esc to cancel"
+
+            async def run_interleaved():
+                with mock.patch.object(relay, "get_all_panes", return_value=([], [])), \
+                     mock.patch.object(relay, "read_pane", new=gated_read), \
+                     mock.patch.object(relay, "broadcast", new=mock.AsyncMock()):
+                    push_task = asyncio.create_task(relay.event_push())
+                    await relay.event_queue.put(dict(event))
+                    await asyncio.sleep(0.05)          # event_push parks on the gated read
+                    # The answer lands; the next poll commits working.
+                    relay.last_statuses["w1:p1"] = "working"
+                    read_gate.set()                    # the read returns, pre-answer screen in hand
+                    await asyncio.sleep(0.15)
+                    push_task.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await push_task
+
+            asyncio.run(run_interleaved())
+
+            self.assertNotIn("w1:p1", relay.last_blocked_prompts)
+
     def test_reset_pane_state_drains_queued_events(self):
         # An event queued before a switch (never dequeued by event_push)
         # must not survive the switch to be processed afterward.
