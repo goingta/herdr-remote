@@ -2187,8 +2187,41 @@ class RelayPollBlockedDedupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(web_push.await_count, 1)
 
     async def test_new_block_after_pane_clears_is_not_an_update(self):
-        """When a pane leaves `blocked` and later blocks again, the relay has
-        forgotten the earlier prompt, so the next notification is a fresh block."""
+        """When a pane leaves `blocked` and later blocks again on a DIFFERENT
+        prompt, the new prompt is a fresh notification."""
+        with loaded_relay() as relay:
+            statuses = iter(["blocked", "working", "blocked"])
+            # Only the blocked polls read the pane (a working pane is skipped),
+            # so the two screens line up with poll1 and poll3.
+            screens = iter(["Approve this?", "Approve that?"])
+
+            def snapshot():
+                return ([{**self.BLOCKED_AGENT, "status": next(statuses)}], [])
+
+            broadcasts = []
+
+            async def capture(message):
+                broadcasts.append(message)
+
+            with mock.patch.object(relay, "get_all_panes", side_effect=snapshot), \
+                 mock.patch.object(relay, "read_pane", side_effect=lambda *a, **k: next(screens)), \
+                 mock.patch.object(relay, "send_web_push", new=mock.AsyncMock()), \
+                 mock.patch.object(relay, "broadcast", side_effect=capture):
+                await relay._poll_once()
+                await relay._poll_once()
+                await relay._poll_once()
+
+        blocked = [m for m in broadcasts if m.get("type") == "blocked"]
+        self.assertEqual(len(blocked), 2)
+        self.assertEqual([m["update"] for m in blocked], [False, False])
+
+    async def test_a_prompt_shown_once_does_not_refire_after_a_status_flicker(self):
+        """herdr's status flickers (an attach, a resize, a probe landing between
+        polls) can break a blocked streak for one round. A prompt the reader has
+        already been shown must come back as an update, not as a fresh
+        notification: measured in production, one pane drew 8 notifications in
+        57 seconds this way, and the phone reader answered it by turning the
+        app off."""
         with loaded_relay() as relay:
             statuses = iter(["blocked", "working", "blocked"])
 
@@ -2202,15 +2235,18 @@ class RelayPollBlockedDedupTests(unittest.IsolatedAsyncioTestCase):
 
             with mock.patch.object(relay, "get_all_panes", side_effect=snapshot), \
                  mock.patch.object(relay, "read_pane", return_value="Approve this?"), \
-                 mock.patch.object(relay, "send_web_push", new=mock.AsyncMock()), \
+                 mock.patch.object(relay, "send_web_push", new=mock.AsyncMock()) as web_push, \
                  mock.patch.object(relay, "broadcast", side_effect=capture):
                 await relay._poll_once()
                 await relay._poll_once()
                 await relay._poll_once()
 
         blocked = [m for m in broadcasts if m.get("type") == "blocked"]
+        # The pane still re-broadcasts after the flicker (clients refresh their
+        # card), but the second broadcast is an update: no second notification.
         self.assertEqual(len(blocked), 2)
-        self.assertEqual([m["update"] for m in blocked], [False, False])
+        self.assertEqual([m["update"] for m in blocked], [False, True])
+        self.assertEqual(web_push.await_count, 1)
 
 
 class RelaySubprocessConcurrencyTests(unittest.TestCase):

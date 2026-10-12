@@ -230,6 +230,13 @@ _activity_status = {}
 _activity_dirty = False
 _activity_flush_task = None
 last_blocked_prompts = {}
+# pane_id -> prompt_id of the last block a NOTIFIER fired for. Unlike last_blocked_prompts this
+# survives a streak break: herdr's status flickers (an attach, a resize, a probe landing between
+# polls) can drop a pane out of `blocked` for one round, and re-firing the notification on its
+# return re-alerted the same menu -- measured in production, 8 notifications in 57 seconds for
+# one pane. Broadcasts still ride the streak (clients refresh their card); only the
+# notification-grade `update=False` is keyed here, so a genuinely new prompt still notifies.
+announced_prompts = {}
 # (host, pane_id) -> does this idle pane hold a question. Keyed with the host like the activity
 # ledger, because every herdr numbers its own panes.
 question_panes = {}
@@ -1228,6 +1235,7 @@ def update_pane_maps(agents, shells=()):
             pane_session_map.pop(pane_id, None)
             last_statuses.pop(pane_id, None)
             last_blocked_prompts.pop(pane_id, None)
+            announced_prompts.pop(pane_id, None)
             agent_cache.pop(pane_id, None)
             shell_pane_map.pop(pane_id, None)
     # Last, so the records carry whatever this call just seeded or bumped.
@@ -1260,6 +1268,9 @@ def reset_pane_state():
     pane_remote_map.clear()
     last_statuses.clear()
     last_blocked_prompts.clear()
+    # A session switch re-points the pane ids at different work; the announce
+    # memory must not carry a stale prompt_id into the new session's blocks.
+    announced_prompts.clear()
     _session_list_cache.clear()
     while True:
         try:
@@ -2598,9 +2609,19 @@ async def _poll_once():
                     # prompt (update=False) and re-fired the notification. Any re-broadcast for
                     # a pane still in the same blocked streak is an update: `previous` is
                     # cleared the moment the pane leaves `blocked` (see the else branch), so
-                    # `previous is not None` means "already announced this block".
-                    message["update"] = previous is not None
+                    # `previous is not None` means "already announced this block". The streak
+                    # test alone re-alerted a prompt the reader had already been shown whenever
+                    # herdr's status flickered for one round and the streak restarted, so the
+                    # announce memory decides it too: a prompt_id that has already drawn a
+                    # notification stays an update even across a streak break, while a new
+                    # prompt_id inside a live streak still reads as the streak's own update.
+                    message["update"] = (
+                        announced_prompts.get(pid) == message["prompt_id"]
+                        or previous is not None
+                    )
                     last_blocked_prompts[pid] = fingerprint
+                    if not message["update"]:
+                        announced_prompts[pid] = message["prompt_id"]
                     log.info("Blocked (poll) pane=%s update=%s", pid, message["update"])
                     await broadcast(message)
                     # Clients still need every re-broadcast (the prompt_id they must echo back
@@ -2701,12 +2722,17 @@ async def event_push():
             # notification was lost exactly when the fast path worked. Push here, on the same
             # one-shot rule the poll uses: announce a new block, stay quiet for a re-broadcast.
             previous = last_blocked_prompts.get(pane_id)
-            message["update"] = previous is not None
+            message["update"] = (
+                announced_prompts.get(pane_id) == message["prompt_id"]
+                or previous is not None
+            )
             last_blocked_prompts[pane_id] = (
                 message["prompt_id"],
                 tuple(message["selected_options"]),
                 message["prompt"],
             )
+            if not message["update"]:
+                announced_prompts[pane_id] = message["prompt_id"]
             log.info("Blocked (event) pane=%s update=%s", pane_id, message["update"])
             await broadcast(message)
             if not message["update"]:
